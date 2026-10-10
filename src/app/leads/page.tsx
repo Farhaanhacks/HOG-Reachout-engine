@@ -1,13 +1,13 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { CountryBadge, EmailBadge } from '../../components/badges';
+import { CountryBadge, EmailBadge, RankBadge } from '../../components/badges';
 import { api, formatDate } from '../../lib/client';
 import type { SavedPerson } from '../../lib/store';
 
 export default function LeadsPage() {
   const [geo, setGeo] = useState('');
-  const [targets, setTargets] = useState(true);
+  const [who, setWho] = useState<'top' | 'targets' | 'all'>('top');
   const [ready, setReady] = useState(false);
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
@@ -17,11 +17,12 @@ export default function LeadsPage() {
   const params = useMemo(() => {
     const p = new URLSearchParams();
     if (geo) p.set('geo', geo);
-    if (targets) p.set('targets', '1');
+    if (who === 'top') p.set('top', '1');
+    if (who === 'targets') p.set('targets', '1');
     if (ready) p.set('ready', '1');
     if (query) p.set('q', query);
     return p.toString();
-  }, [geo, targets, ready, query]);
+  }, [geo, who, ready, query]);
 
   useEffect(() => {
     setError('');
@@ -54,7 +55,11 @@ export default function LeadsPage() {
             <option value="ae">UAE</option>
             <option value="us">US</option>
           </select>
-          <label className="check"><input id="leads-targets" type="checkbox" checked={targets} onChange={(e) => setTargets(e.target.checked)} /> Founders, C-suite, owners, partners</label>
+          <select id="leads-who" value={who} onChange={(e) => setWho(e.target.value as 'top' | 'targets' | 'all')} aria-label="Who">
+            <option value="top">Main person of each company</option>
+            <option value="targets">All founders, C-suite and partners</option>
+            <option value="all">Everyone saved</option>
+          </select>
           <label className="check"><input id="leads-ready" type="checkbox" checked={ready} onChange={(e) => setReady(e.target.checked)} /> Email ready</label>
         </div>
         {error && <p className="alert" role="alert">{error}</p>}
@@ -68,7 +73,7 @@ export default function LeadsPage() {
               {people?.map((p) => (
                 <tr key={String(p.id)}>
                   <td><a href={p.linkedin_url} target="_blank" rel="noreferrer">{p.name}</a></td>
-                  <td>{p.title || <span className="muted">—</span>}</td>
+                  <td>{p.title || <span className="muted">—</span>} <RankBadge rank={p.rank} /></td>
                   <td>{p.company || <span className="muted">—</span>}</td>
                   <td><CountryBadge geo={p.geo} match={p.geo_match} /></td>
                   <td>

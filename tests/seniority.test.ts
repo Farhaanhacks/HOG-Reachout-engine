@@ -74,6 +74,23 @@ describe('tagTitle', () => {
     expect(tagTitle('CEO, former Goldman Sachs banker')).toMatchObject({ isTarget: true });
   });
 
+  it('ranks the main person of a company first', () => {
+    expect(tagTitle('Founder & CEO').rank).toBe(1);
+    expect(tagTitle('Managing Director').rank).toBe(1);
+    expect(tagTitle('Chairman').rank).toBe(1);
+    expect(tagTitle('Managing Partner', 'Acme Capital').rank).toBe(1);
+    expect(tagTitle('Chief Technology Officer')).toMatchObject({ rank: 2, isTarget: true });
+    expect(tagTitle('Vice President, Sales')).toMatchObject({ rank: 3, isTarget: false });
+    expect(tagTitle('Former CEO').rank).toBe(3);
+  });
+
+  it('treats a CIO or principal as the main person only at a fund', () => {
+    expect(tagTitle('CIO', 'Zeta Capital').rank).toBe(1);
+    expect(tagTitle('CIO', 'Acme Retail').rank).toBe(2);
+    expect(tagTitle('Principal', 'Al Noor Family Office')).toMatchObject({ rank: 1, isTarget: true });
+    expect(tagTitle('Principal Engineer', 'Google')).toMatchObject({ rank: 3, isTarget: false });
+  });
+
   it('returns nothing for an empty title', () => {
     expect(tagTitle('')).toMatchObject({ labels: [], seniority: 'other', isTarget: false });
   });

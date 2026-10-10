@@ -24,7 +24,7 @@ export default function Step5() {
     setBusy(false);
   }
 
-  const cell = { padding: '6px 8px', borderBottom: '1px solid #d8e0e5', textAlign: 'left' as const };
+  const cell = { padding: '6px 8px', borderBottom: '1px solid #2c2e32', textAlign: 'left' as const };
 
   return (
     <>
@@ -40,7 +40,7 @@ export default function Step5() {
         </select>
         <button onClick={run} disabled={busy} style={{ padding: '8px 16px' }}>{busy ? 'Searching…' : 'Find website'}</button>
       </div>
-      {error && <p role="alert" style={{ color: '#a3302b' }}>{error}</p>}
+      {error && <p role="alert" style={{ color: '#f07f78' }}>{error}</p>}
       {out && (
         <>
           <h2>{out.domain ? `Domain: ${out.domain}` : 'No convincing domain found'}</h2>

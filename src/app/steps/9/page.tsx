@@ -55,7 +55,7 @@ export default function Step9() {
     await refresh();
   });
 
-  const cell = { padding: '6px 8px', borderBottom: '1px solid #d8e0e5', textAlign: 'left' as const, verticalAlign: 'top' as const };
+  const cell = { padding: '6px 8px', borderBottom: '1px solid #2c2e32', textAlign: 'left' as const, verticalAlign: 'top' as const };
 
   return (
     <>
@@ -68,7 +68,7 @@ export default function Step9() {
         <button onClick={doPreview} disabled={busy} style={{ padding: '8px 16px' }}>Preview (free)</button>
         <button onClick={doRun} disabled={busy || !preview?.length} style={{ padding: '8px 16px' }} title="Preview first">Enrich with Apollo</button>
       </div>
-      {error && <p role="alert" style={{ color: '#a3302b' }}>{error}</p>}
+      {error && <p role="alert" style={{ color: '#f07f78' }}>{error}</p>}
       {status && (
         <p>
           {status.pending} waiting · {status.checked} looked up · {status.withEmail} with a confident email · today {status.usedToday}/{status.dailyLimit} lookups, {status.creditsToday} credits.

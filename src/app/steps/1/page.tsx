@@ -37,7 +37,7 @@ export default function Step1() {
         </select>
         <button onClick={run} disabled={busy} style={{ padding: '8px 16px' }}>{busy ? 'Searching…' : 'Search'}</button>
       </div>
-      {error && <p role="alert" style={{ color: '#a3302b' }}>{error}</p>}
+      {error && <p role="alert" style={{ color: '#f07f78' }}>{error}</p>}
       {results && (
         <>
           <p>{results.length} results</p>

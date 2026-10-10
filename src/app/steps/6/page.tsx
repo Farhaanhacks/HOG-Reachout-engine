@@ -52,7 +52,7 @@ export default function Step6() {
     setBusy(false);
   }
 
-  const cell = { padding: '6px 8px', borderBottom: '1px solid #d8e0e5', textAlign: 'left' as const, verticalAlign: 'top' as const };
+  const cell = { padding: '6px 8px', borderBottom: '1px solid #2c2e32', textAlign: 'left' as const, verticalAlign: 'top' as const };
 
   return (
     <>
@@ -68,7 +68,7 @@ export default function Step6() {
         <button onClick={run} disabled={busy} style={{ padding: '8px 16px' }}>{busy ? 'Working…' : 'Search and save'}</button>
         <button onClick={show} disabled={busy} style={{ padding: '8px 16px' }}>Show saved</button>
       </div>
-      {error && <p role="alert" style={{ color: '#a3302b' }}>{error}</p>}
+      {error && <p role="alert" style={{ color: '#f07f78' }}>{error}</p>}
       {summary && (
         <p>
           Found {summary.found} profiles. {summary.excludedOutsideCountry} based outside the country were skipped. <strong>{summary.inserted} new</strong>, {summary.updated} already saved.

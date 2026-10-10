@@ -17,7 +17,15 @@ export type TitleTag = {
   /** False for "Former CEO", "Assistant to the CEO", "Chief of Staff": not the person to write to. */
   current: boolean;
   isTarget: boolean;
+  /**
+   * 1 = the main person of the company (founder, CEO, MD, president, chairman, owner, managing or general partner, and
+   * at a fund the CIO or principal). 2 = other C-suite or partners (CTO, CMO, CFO…). 3 = everyone else.
+   */
+  rank: 1 | 2 | 3;
 };
+
+const TOP_ROLE = /\b(ceo|chief executive|managing director|president|chairman|chairwoman|chairperson|managing partner|general partner|founding partner|owner|proprietor)\b/i;
+const FUND_TOP_ROLE = /\b(cio|chief investment( officer)?|principal)\b/i;
 
 // "Former CEO" or "Ex-Founder" at the start, or "former" right before a role. "Founder & CEO, ex-Google" is still a founder.
 const NOT_THE_PERSON = /^\s*(former|past|ex|retired|aspiring|future)\b[\s-]|\bformer\s+(?=ceo|coo|cfo|cto|cio|chief|founder|co-?founder|president|partner|owner|managing|chairman)|\bemeritus\b|\bassistant to\b|\bexecutive assistant\b|\bchief of staff\b|\badvisor to\b/i;
@@ -44,7 +52,7 @@ const unique = (list: string[]) => [...new Set(list)];
 /** Reads a job title into seniority labels and search keywords. Pure text rules, no AI. */
 export function tagTitle(rawTitle: string, company = ''): TitleTag {
   const title = String(rawTitle ?? '').trim();
-  const empty: TitleTag = { labels: [], seniority: 'other', keywords: [], fundPrincipal: false, current: true, isTarget: false };
+  const empty: TitleTag = { labels: [], seniority: 'other', keywords: [], fundPrincipal: false, current: true, isTarget: false, rank: 3 };
   if (!title) return empty;
   if (NOT_THE_PERSON.test(title)) return { ...empty, current: false };
 
@@ -86,12 +94,16 @@ export function tagTitle(rawTitle: string, company = ''): TitleTag {
     /\b(managing partner|general partner|founding partner|portfolio manager|chief investment officer|cio|principal|chairman|founder)\b/i.test(t) &&
     FUND_COMPANY.test(company);
 
+  const rank: TitleTag['rank'] =
+    labels.includes('founder') || TOP_ROLE.test(t) || (FUND_COMPANY.test(company) && FUND_TOP_ROLE.test(t)) ? 1 : labels.some((l) => TARGET_LABELS.includes(l)) ? 2 : 3;
+
   return {
     labels,
     seniority: labels[0] ?? 'other',
     keywords: unique(keywords),
     fundPrincipal,
     current: true,
-    isTarget: labels.some((l) => TARGET_LABELS.includes(l)),
+    isTarget: rank <= 2,
+    rank,
   };
 }

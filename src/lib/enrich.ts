@@ -9,15 +9,15 @@ export function dailyLimitFromEnv(): number {
   return Math.max(1, Number(process.env.APOLLO_DAILY_LIMIT) || DEFAULT_DAILY_LIMIT);
 }
 
-/** Who is worth a lookup: target people not based elsewhere, never looked up before, oldest first. */
+/** Who is worth a lookup: target people not based elsewhere, never looked up before. The main person of each company first, then oldest first. */
 export async function pendingPeople(db: Db, limit: number): Promise<SavedPerson[]> {
   await ensureSchema(db);
   return db.query<SavedPerson>(
     `SELECT id, linkedin_url, name, title, company, location, geo, geo_match, labels, is_target, inferred, status, seen_count, first_seen, last_seen,
-            email, email_status, apollo_status, apollo_confidence, apollo_tier
+            email, email_status, apollo_status, apollo_confidence, apollo_tier, rank
      FROM people
      WHERE is_target = TRUE AND geo_match <> 'other' AND apollo_status = 'none'
-     ORDER BY first_seen ASC, id ASC LIMIT $1`,
+     ORDER BY COALESCE(rank, 3) ASC, first_seen ASC, id ASC LIMIT $1`,
     [Math.max(1, Math.min(limit, 500))],
   );
 }

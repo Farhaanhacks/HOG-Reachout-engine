@@ -5,19 +5,19 @@ import { RunBadge } from '../../components/badges';
 import { api, countryName, formatDate, post } from '../../lib/client';
 import type { EnrichSummary } from '../../lib/enrich';
 import { GEOS, type Geo } from '../../lib/geo';
-import { buildQueries } from '../../lib/queries';
+import { DEFAULT_GEOS, DEFAULT_SEGMENTS, SEGMENTS, planQueries, segmentById } from '../../lib/icp';
 import type { Run } from '../../lib/run';
 
 const list = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
 const ratio = (a: number, b: number) => (b ? (a / b).toFixed(1) : '—');
+const toggle = <T,>(items: T[], item: T) => (items.includes(item) ? items.filter((i) => i !== item) : [...items, item]);
 
 export default function RunPage() {
-  const [geo, setGeo] = useState<Geo>('ae');
-  const [titles, setTitles] = useState('Founder, CEO, Co-Founder, Managing Partner, Chairman, Owner');
-  const [keywords, setKeywords] = useState('');
-  const [cities, setCities] = useState('');
+  const [geos, setGeos] = useState<Geo[]>(DEFAULT_GEOS);
+  const [segments, setSegments] = useState<string[]>(DEFAULT_SEGMENTS);
+  const [extraTitles, setExtraTitles] = useState('');
   const [pages, setPages] = useState(2);
-  const [maxQueries, setMaxQueries] = useState(10);
+  const [maxQueries, setMaxQueries] = useState(20);
   const [withApollo, setWithApollo] = useState(false);
   const [apolloLimit, setApolloLimit] = useState(20);
 
@@ -28,7 +28,7 @@ export default function RunPage() {
   const [busy, setBusy] = useState(false);
   const stop = useRef(false);
 
-  const planned = useMemo(() => buildQueries({ geo, titles: list(titles), keywords: list(keywords), cities: list(cities) }), [geo, titles, keywords, cities]);
+  const planned = useMemo(() => planQueries({ geos, segments, extraTitles: list(extraTitles) }), [geos, segments, extraTitles]);
   const queryCount = Math.min(planned.length, maxQueries);
 
   const loadHistory = useCallback(() => {
@@ -49,13 +49,14 @@ export default function RunPage() {
         if (stop.current) {
           r = (await api<{ run: Run }>(`/api/runs/${r.id}/finish`, post({ status: 'stopped' }))).run;
           setRun(r);
-          say('Stopped. People found so far are saved.');
+          say('Stopped. Everyone found so far is saved.');
           return;
         }
         const before = r;
+        const q = r.queries[r.next_index];
         r = (await api<{ run: Run }>(`/api/runs/${r.id}/step`, post())).run;
         setRun(r);
-        say(`Search ${r.next_index}/${r.queries.length}: ${r.inserted - before.inserted} new, ${r.updated - before.updated} already saved, ${r.excluded - before.excluded} based elsewhere`);
+        say(`${r.next_index}/${r.queries.length} · ${countryName(q.geo)} · ${segmentById(q.segment)?.label ?? 'Search'}: ${r.inserted - before.inserted} new, ${r.updated - before.updated} already saved, ${r.excluded - before.excluded} based elsewhere`);
       }
       if (r.status === 'running' && apollo) {
         say('Getting emails from Apollo…');
@@ -79,11 +80,12 @@ export default function RunPage() {
   }
 
   async function start() {
-    if (!list(titles).length) return setError('Add at least one title.');
+    if (!geos.length) return setError('Choose at least one country.');
+    if (!segments.length) return setError('Choose at least one type of lead.');
     setLog([]);
     try {
-      const d = await api<{ run: Run }>('/api/runs', post({ geo, titles: list(titles), keywords: list(keywords), cities: list(cities), pages, maxQueries }));
-      say(`Started: ${d.run.queries.length} searches in ${countryName(geo)}.`);
+      const d = await api<{ run: Run }>('/api/runs', post({ geos, segments, extraTitles: list(extraTitles), pages, maxQueries }));
+      say(`Started: ${d.run.queries.length} searches across ${countryName(geos.join(','))}.`);
       await drive(d.run, withApollo ? apolloLimit : null);
     } catch (e) {
       setError((e as Error).message);
@@ -91,70 +93,86 @@ export default function RunPage() {
   }
 
   function resume(r: Run) {
-    setLog([`Continuing run from ${formatDate(r.created_at)}.`]);
+    setLog([`Continuing the run from ${formatDate(r.created_at)}.`]);
     drive(r, withApollo ? apolloLimit : null);
   }
 
   const done = run ? run.next_index : 0;
   const totalQ = run ? run.queries.length : 0;
-  const canResume = run && run.status === 'running' && !busy;
 
   return (
     <div className="page">
       <div className="page-head">
         <div>
           <h1>Find leads</h1>
-          <p className="sub">Describe who you want. The engine searches Google for their LinkedIn profiles, keeps people based in the chosen country, saves each person once, and can then ask Apollo for their emails.</p>
+          <p className="sub">Finds the main decision-maker at each company: founders and CEOs, managing directors, and at funds the CIO or managing partner. It searches Google for their LinkedIn profiles, keeps people based in the chosen countries, and saves each person once.</p>
         </div>
       </div>
 
       <section className="card">
-        <h2>Who to find</h2>
-        <div className="form">
-          <label className="field">
-            Country
-            <select id="run-geo" value={geo} onChange={(e) => setGeo(e.target.value as Geo)} disabled={busy}>
-              {(Object.keys(GEOS) as Geo[]).map((g) => <option key={g} value={g}>{GEOS[g].label}</option>)}
-            </select>
-          </label>
-          <label className="field wide">
-            Job titles <span className="hint">comma separated</span>
-            <input id="run-titles" value={titles} onChange={(e) => setTitles(e.target.value)} disabled={busy} />
-          </label>
-          <label className="field">
-            Must mention <span className="hint">optional, e.g. hedge fund, real estate</span>
-            <input id="run-keywords" value={keywords} onChange={(e) => setKeywords(e.target.value)} disabled={busy} />
-          </label>
-          <label className="field">
-            Cities <span className="hint">blank = {GEOS[geo].cities.join(', ')}</span>
-            <input id="run-cities" value={cities} onChange={(e) => setCities(e.target.value)} disabled={busy} />
-          </label>
-          <label className="field">
-            Result pages per search <span className="hint">more pages, more people, more searches</span>
-            <select id="run-pages" value={pages} onChange={(e) => setPages(Number(e.target.value))} disabled={busy}>
-              <option value={1}>1 page (up to 10 results)</option>
-              <option value={2}>2 pages (up to 20)</option>
-              <option value={3}>3 pages (up to 30)</option>
-            </select>
-          </label>
-          <label className="field">
-            Most searches this run
-            <input id="run-max" type="number" min={1} max={30} value={maxQueries} onChange={(e) => setMaxQueries(Math.max(1, Math.min(30, Number(e.target.value) || 1)))} disabled={busy} />
-          </label>
+        <div className="section-label">Countries</div>
+        <div className="tiles">
+          {(Object.keys(GEOS) as Geo[]).map((g) => (
+            <label key={g} className={`tile ${geos.includes(g) ? 'on' : ''}`}>
+              <input type="checkbox" checked={geos.includes(g)} onChange={() => setGeos(toggle(geos, g))} disabled={busy} />
+              <div>
+                <b>{GEOS[g].label}</b>
+                <span>{GEOS[g].cities.join(', ')}</span>
+              </div>
+            </label>
+          ))}
         </div>
+
+        <div className="section-label">Who to find</div>
+        <div className="tiles">
+          {SEGMENTS.map((s) => (
+            <label key={s.id} className={`tile ${segments.includes(s.id) ? 'on' : ''}`}>
+              <input type="checkbox" checked={segments.includes(s.id)} onChange={() => setSegments(toggle(segments, s.id))} disabled={busy} />
+              <div>
+                <b>{s.label}</b>
+                <span>{s.description}</span>
+                <div className="titles">{s.titles.join(' · ')}</div>
+              </div>
+            </label>
+          ))}
+        </div>
+
+        <details>
+          <summary>More options</summary>
+          <div className="form">
+            <label className="field wide">
+              Extra titles <span className="hint">optional, added to every type above, comma separated</span>
+              <input id="run-extra" value={extraTitles} onChange={(e) => setExtraTitles(e.target.value)} disabled={busy} placeholder="e.g. Chief Revenue Officer" />
+            </label>
+            <label className="field">
+              Result pages per search <span className="hint">more pages find more people and use more searches</span>
+              <select id="run-pages" value={pages} onChange={(e) => setPages(Number(e.target.value))} disabled={busy}>
+                <option value={1}>1 page (up to 10 results)</option>
+                <option value={2}>2 pages (up to 20)</option>
+                <option value={3}>3 pages (up to 30)</option>
+              </select>
+            </label>
+            <label className="field">
+              Most searches this run <span className="hint">spread evenly over countries and types</span>
+              <input id="run-max" type="number" min={1} max={60} value={maxQueries} onChange={(e) => setMaxQueries(Math.max(1, Math.min(60, Number(e.target.value) || 1)))} disabled={busy} />
+            </label>
+          </div>
+        </details>
+
         <div className="row">
           <label className="check"><input id="run-apollo" type="checkbox" checked={withApollo} onChange={(e) => setWithApollo(e.target.checked)} disabled={busy} /> Then get emails from Apollo for up to</label>
-          <input id="run-apollo-limit" type="number" min={1} max={100} value={apolloLimit} onChange={(e) => setApolloLimit(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} disabled={busy || !withApollo} style={{ width: 80 }} aria-label="Apollo lookups" />
-          <span className="muted small">people (spends Apollo credits)</span>
+          <input id="run-apollo-limit" type="number" min={1} max={100} value={apolloLimit} onChange={(e) => setApolloLimit(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} disabled={busy || !withApollo} style={{ width: 90 }} aria-label="Apollo lookups" />
+          <span className="muted small">people, main people first (spends Apollo credits)</span>
         </div>
+
         <p className="muted small">
-          This plan makes {queryCount} search{queryCount === 1 ? '' : 'es'}, up to {queryCount * pages} Serper credits.
-          {planned.length > maxQueries ? ` The brief has ${planned.length} combinations; raise "Most searches" to cover them all.` : ''}
+          This run makes {queryCount} search{queryCount === 1 ? '' : 'es'}, at most {queryCount * pages} Serper credits.
+          {planned.length > maxQueries ? ` Your choices make ${planned.length} searches in total; raise "Most searches" under More options to cover all of them.` : ''}
         </p>
         <div className="row">
-          <button className="primary" onClick={start} disabled={busy || !queryCount}>{busy ? 'Running…' : 'Start'}</button>
+          <button className="primary" onClick={start} disabled={busy || !queryCount}>{busy ? 'Running…' : 'Find leads'}</button>
           {busy && <button className="danger" onClick={() => (stop.current = true)}>Stop after this search</button>}
-          {run && canResume && <button onClick={() => resume(run)}>Continue</button>}
+          {run && run.status === 'running' && !busy && <button onClick={() => resume(run)}>Continue</button>}
         </div>
         {error && <p className="alert" role="alert">{error}</p>}
       </section>
@@ -173,7 +191,7 @@ export default function RunPage() {
             <div className="stat"><div className="n">{run.excluded}</div><div className="l">Based elsewhere, skipped</div></div>
             <div className="stat"><div className="n">{run.apollo_with_email}</div><div className="l">Emails ready</div></div>
           </div>
-          <h3>Cost</h3>
+          <div className="section-label">Cost</div>
           <div className="stats">
             <div className="stat"><div className="n">{run.searches}</div><div className="l">Serper searches</div></div>
             <div className="stat"><div className="n">{run.apollo_credits}</div><div className="l">Apollo credits ({run.apollo_requested} lookups)</div></div>
@@ -190,14 +208,14 @@ export default function RunPage() {
           <div className="table-wrap">
             <table>
               <thead>
-                <tr><th>Started</th><th>Country</th><th>Titles</th><th className="num">Searches</th><th className="num">New</th><th className="num">Emails</th><th className="num">Credits</th><th>Status</th><th></th></tr>
+                <tr><th>Started</th><th>Countries</th><th>Who</th><th className="num">Searches</th><th className="num">New</th><th className="num">Emails</th><th className="num">Credits</th><th>Status</th><th></th></tr>
               </thead>
               <tbody>
                 {history.map((r) => (
                   <tr key={String(r.id)}>
                     <td>{formatDate(r.created_at)}</td>
                     <td>{countryName(r.geo)}</td>
-                    <td className="small">{r.brief.titles.join(', ')}{r.brief.keywords?.length ? ` · ${r.brief.keywords.join(', ')}` : ''}</td>
+                    <td className="small">{r.brief.segments.length ? r.brief.segments.map((s) => segmentById(s)?.label ?? s).join(', ') : r.brief.extraTitles.join(', ')}</td>
                     <td className="num">{r.next_index}/{r.queries.length}</td>
                     <td className="num">{r.inserted}</td>
                     <td className="num">{r.apollo_with_email}</td>

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { checkPassword } from '../../../lib/auth';
 import { getDb } from '../../../lib/db';
-import { isGeo } from '../../../lib/geo';
+import { isGeo, type Geo } from '../../../lib/geo';
 import { createRun, listRuns } from '../../../lib/run';
 
 export const dynamic = 'force-dynamic';
@@ -18,15 +18,14 @@ export async function GET(req: Request) {
   }
 }
 
-/** Starts a run from a brief: { geo, titles, cities?, keywords?, pages?, maxQueries? }. Spends nothing yet. */
+/** Starts a run: { geos: ["ae","us"], segments: ["leaders",…], extraTitles?, pages?, maxQueries? }. Spends nothing yet. */
 export async function POST(req: Request) {
   const denied = checkPassword(req);
   if (denied) return denied;
   const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-  const geo = String(b.geo ?? '');
-  if (!isGeo(geo)) return NextResponse.json({ error: 'Choose the UAE or the US.' }, { status: 400 });
+  const geos = list(b.geos).filter(isGeo) as Geo[];
   try {
-    const run = await createRun(getDb(), { geo, titles: list(b.titles), cities: list(b.cities), keywords: list(b.keywords) }, { pages: Number(b.pages), maxQueries: Number(b.maxQueries) });
+    const run = await createRun(getDb(), { geos, segments: list(b.segments), extraTitles: list(b.extraTitles) }, { pages: Number(b.pages), maxQueries: Number(b.maxQueries) });
     return NextResponse.json({ run });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });

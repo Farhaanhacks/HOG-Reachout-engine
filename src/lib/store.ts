@@ -37,7 +37,14 @@ export async function ensureSchema(db: Db): Promise<void> {
     ADD COLUMN IF NOT EXISTS apollo_status TEXT NOT NULL DEFAULT 'none',
     ADD COLUMN IF NOT EXISTS apollo_confidence TEXT NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS apollo_tier INTEGER NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS apollo_checked_at TIMESTAMPTZ`);
+    ADD COLUMN IF NOT EXISTS apollo_checked_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS rank INTEGER`);
+  // People saved before ranks existed get one from their title (a small, one-off pass).
+  const unranked = await db.query<{ id: number | string; title: string; company: string }>('SELECT id, title, company FROM people WHERE rank IS NULL LIMIT 5000');
+  for (const r of unranked) {
+    const tag = tagTitle(r.title, r.company);
+    await db.query('UPDATE people SET rank = $2, is_target = $3 WHERE id = $1', [r.id, tag.rank, tag.isTarget]);
+  }
   await db.query(`CREATE TABLE IF NOT EXISTS enrichment_log (
     id BIGSERIAL PRIMARY KEY,
     ran_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -85,15 +92,16 @@ export type SaveResult = { inserted: number; updated: number };
  * Saves people by LinkedIn URL. A profile already saved is not added again: its "seen" count goes up, and any blank
  * field (title, company, location) is filled in from the new sighting. Existing values are never overwritten.
  */
-export async function savePeople(db: Db, people: Person[], geo: Geo, query: string): Promise<SaveResult> {
+export async function savePeople(db: Db, people: Person[], geo: Geo, query: string, opts: { fundContext?: boolean } = {}): Promise<SaveResult> {
   await ensureSchema(db);
   let inserted = 0;
   let updated = 0;
   for (const p of people) {
-    const tag = tagTitle(p.title, p.company);
+    // Found by a fund search (hedge fund, VC, family office): a CIO or principal there is the main person.
+    const tag = tagTitle(p.title, opts.fundContext ? `${p.company} fund` : p.company);
     const rows = await db.query<{ inserted: boolean }>(
-      `INSERT INTO people (linkedin_url, name, title, company, location, geo, geo_match, labels, is_target, inferred, snippet, source_query)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      `INSERT INTO people (linkedin_url, name, title, company, location, geo, geo_match, labels, is_target, inferred, snippet, source_query, rank)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        ON CONFLICT (linkedin_url) DO UPDATE SET
          last_seen = now(),
          seen_count = people.seen_count + 1,
@@ -101,12 +109,13 @@ export async function savePeople(db: Db, people: Person[], geo: Geo, query: stri
          location = COALESCE(NULLIF(people.location, ''), EXCLUDED.location),
          geo_match = CASE WHEN people.geo_match = 'unknown' THEN EXCLUDED.geo_match ELSE people.geo_match END,
          labels = CASE WHEN people.title = '' THEN EXCLUDED.labels ELSE people.labels END,
-         is_target = CASE WHEN people.title = '' THEN EXCLUDED.is_target ELSE people.is_target END,
+         is_target = CASE WHEN people.title = '' THEN EXCLUDED.is_target ELSE people.is_target OR EXCLUDED.is_target END,
+         rank = CASE WHEN people.title = '' THEN EXCLUDED.rank ELSE LEAST(COALESCE(people.rank, 3), EXCLUDED.rank) END,
          inferred = CASE WHEN people.title = '' OR people.company = '' THEN EXCLUDED.inferred ELSE people.inferred END,
          title = COALESCE(NULLIF(people.title, ''), EXCLUDED.title),
          company = COALESCE(NULLIF(people.company, ''), EXCLUDED.company)
        RETURNING (xmax = 0) AS inserted`,
-      [p.linkedin, p.name, p.title, p.company, p.location, geo, p.geoMatch, tag.labels.join(', '), tag.isTarget, p.inferred, p.snippet.slice(0, 1000), query],
+      [p.linkedin, p.name, p.title, p.company, p.location, geo, p.geoMatch, tag.labels.join(', '), tag.isTarget, p.inferred, p.snippet.slice(0, 1000), query, tag.rank],
     );
     if (rows[0]?.inserted) inserted++;
     else updated++;
@@ -135,6 +144,8 @@ export type SavedPerson = {
   apollo_status: string;
   apollo_confidence: string;
   apollo_tier: number;
+  /** 1 = the main person of the company, 2 = other C-suite or partner, 3 = other. */
+  rank: number | null;
 };
 
 export type ListOptions = {
@@ -142,6 +153,8 @@ export type ListOptions = {
   targetOnly?: boolean;
   /** Only people with a confident Apollo email. */
   ready?: boolean;
+  /** Only the main person of each company (rank 1). */
+  topOnly?: boolean;
   /** Text to find in name, title or company. */
   q?: string;
   limit?: number;
@@ -157,6 +170,7 @@ export async function listPeople(db: Db, opts: ListOptions = {}): Promise<SavedP
   }
   if (opts.targetOnly) where.push('is_target = TRUE');
   if (opts.ready) where.push(`apollo_status = 'matched'`);
+  if (opts.topOnly) where.push('rank = 1');
   if (opts.q?.trim()) {
     params.push(`%${opts.q.trim()}%`);
     const n = params.length;
@@ -165,7 +179,7 @@ export async function listPeople(db: Db, opts: ListOptions = {}): Promise<SavedP
   params.push(Math.min(Math.max(opts.limit ?? 200, 1), 1000));
   return db.query<SavedPerson>(
     `SELECT id, linkedin_url, name, title, company, location, geo, geo_match, labels, is_target, inferred, status, seen_count, first_seen, last_seen,
-            email, email_status, apollo_status, apollo_confidence, apollo_tier
+            email, email_status, apollo_status, apollo_confidence, apollo_tier, rank
      FROM people ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY first_seen DESC, id DESC LIMIT $${params.length}`,
     params,
   );

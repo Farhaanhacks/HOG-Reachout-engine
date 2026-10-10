@@ -8,6 +8,7 @@ export function filtersFrom(url: URL): ListOptions {
     geo: isGeo(geo) ? geo : undefined,
     targetOnly: url.searchParams.get('targets') === '1',
     ready: url.searchParams.get('ready') === '1',
+    topOnly: url.searchParams.get('top') === '1',
     q: url.searchParams.get('q') ?? '',
   };
 }

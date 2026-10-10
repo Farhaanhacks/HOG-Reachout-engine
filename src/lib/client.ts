@@ -8,7 +8,12 @@ export async function api<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const post = (body: unknown = {}): RequestInit => ({ method: 'POST', body: JSON.stringify(body) });
 
-export const countryName = (geo: string) => (geo === 'ae' ? 'UAE' : geo === 'us' ? 'US' : geo);
+/** "ae" gives "UAE"; "ae,us" gives "UAE + US". */
+export const countryName = (geo: string) =>
+  geo
+    .split(',')
+    .map((g) => (g === 'ae' ? 'UAE' : g === 'us' ? 'US' : g))
+    .join(' + ');
 
 export function formatDate(value: string | null | undefined): string {
   if (!value) return '—';

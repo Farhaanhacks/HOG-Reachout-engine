@@ -16,7 +16,7 @@ export default function Step4() {
       }),
     [text],
   );
-  const cell = { padding: '6px 8px', borderBottom: '1px solid #d8e0e5', textAlign: 'left' as const, verticalAlign: 'top' as const };
+  const cell = { padding: '6px 8px', borderBottom: '1px solid #2c2e32', textAlign: 'left' as const, verticalAlign: 'top' as const };
 
   return (
     <>

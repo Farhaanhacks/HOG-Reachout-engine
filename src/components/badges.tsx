@@ -23,6 +23,13 @@ export function EmailBadge({ status }: { status: string }) {
   return <span className={`badge ${tone}`}>{label}</span>;
 }
 
+/** Marks the main person of a company. */
+export function RankBadge({ rank }: { rank: number | null | undefined }) {
+  if (rank === 1) return <span className="badge accent" title="The main decision-maker at the company">Main person</span>;
+  if (rank === 2) return <span className="badge" title="C-suite or partner">Leadership</span>;
+  return null;
+}
+
 export function CountryBadge({ geo, match }: { geo: string; match?: string }) {
   const name = geo === 'ae' ? 'UAE' : geo === 'us' ? 'US' : geo;
   return <span className={`badge ${match === 'match' ? 'accent' : ''}`} title={match === 'match' ? 'Location confirmed' : 'No location on the profile'}>{name}{match === 'match' ? '' : '?'}</span>;
