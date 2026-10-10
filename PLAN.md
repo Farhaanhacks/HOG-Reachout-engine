@@ -31,6 +31,8 @@ After the engine: email finder (Apollo or an alternative), then email automation
 ## Status
 - [x] Plan
 - [x] Step 1 works live for the UAE (10 results with LinkedIn profiles). US search not yet checked.
+- [ ] Step 6 written (`/steps/6`, `src/lib/store.ts`, `src/lib/db.ts`; Postgres via `DATABASE_URL`; tests run against an embedded Postgres in `tests/store.test.ts`), not yet run. `/api/health` now also reports whether the database answers.
+- Scope change: the goal is LinkedIn profile URLs; Apollo turns them into emails later (step 9). Name, title and company are best-effort only.
 - [ ] Steps 4 (`/steps/4`, `src/lib/seniority.ts`) and 5 (`/steps/5`, `src/lib/website.ts`, ported from Inveck) written with tests, not yet run. Next: step 6 (dedupe and store), which needs a database.
 - [ ] Steps 2 and 3 written (`/steps/2`, `/steps/3`, tests in `tests/linkedin.test.ts`), not yet run: Node is not installed on this machine
 - Findings from the real step 1 output that shaped step 3: the city word can match a company name (a Bay Area CEO of "Dubai Technologies"), so each person's location line is checked; titles are cut off with "..." so the line under the result supplies the full company; profile links come on several hosts (`ae.linkedin.com`, `www.linkedin.com`) so URLs are normalised.
