@@ -46,6 +46,28 @@ export async function ensureSchema(db: Db): Promise<void> {
     with_email INTEGER NOT NULL,
     credits NUMERIC NOT NULL DEFAULT 0
   )`);
+  // Full runs (step 7): one row per run, with what it searched, found and spent.
+  await db.query(`CREATE TABLE IF NOT EXISTS runs (
+    id BIGSERIAL PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at TIMESTAMPTZ,
+    geo TEXT NOT NULL,
+    brief TEXT NOT NULL,
+    queries TEXT NOT NULL,
+    pages INTEGER NOT NULL DEFAULT 2,
+    next_index INTEGER NOT NULL DEFAULT 0,
+    searches INTEGER NOT NULL DEFAULT 0,
+    results INTEGER NOT NULL DEFAULT 0,
+    found INTEGER NOT NULL DEFAULT 0,
+    excluded INTEGER NOT NULL DEFAULT 0,
+    inserted INTEGER NOT NULL DEFAULT 0,
+    updated INTEGER NOT NULL DEFAULT 0,
+    apollo_requested INTEGER NOT NULL DEFAULT 0,
+    apollo_with_email INTEGER NOT NULL DEFAULT 0,
+    apollo_credits DOUBLE PRECISION NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'running',
+    error TEXT NOT NULL DEFAULT ''
+  )`);
   ready.add(db);
 }
 
@@ -115,7 +137,17 @@ export type SavedPerson = {
   apollo_tier: number;
 };
 
-export async function listPeople(db: Db, opts: { geo?: Geo; targetOnly?: boolean; limit?: number } = {}): Promise<SavedPerson[]> {
+export type ListOptions = {
+  geo?: Geo;
+  targetOnly?: boolean;
+  /** Only people with a confident Apollo email. */
+  ready?: boolean;
+  /** Text to find in name, title or company. */
+  q?: string;
+  limit?: number;
+};
+
+export async function listPeople(db: Db, opts: ListOptions = {}): Promise<SavedPerson[]> {
   await ensureSchema(db);
   const where: string[] = [];
   const params: unknown[] = [];
@@ -124,6 +156,12 @@ export async function listPeople(db: Db, opts: { geo?: Geo; targetOnly?: boolean
     where.push(`geo = $${params.length}`);
   }
   if (opts.targetOnly) where.push('is_target = TRUE');
+  if (opts.ready) where.push(`apollo_status = 'matched'`);
+  if (opts.q?.trim()) {
+    params.push(`%${opts.q.trim()}%`);
+    const n = params.length;
+    where.push(`(name ILIKE $${n} OR title ILIKE $${n} OR company ILIKE $${n})`);
+  }
   params.push(Math.min(Math.max(opts.limit ?? 200, 1), 1000));
   return db.query<SavedPerson>(
     `SELECT id, linkedin_url, name, title, company, location, geo, geo_match, labels, is_target, inferred, status, seen_count, first_seen, last_seen,

@@ -28,7 +28,7 @@ export default function Step5() {
 
   return (
     <>
-      <p><Link href="/">Back to steps</Link></p>
+      <p><Link href="/tools">Back to tools</Link></p>
       <h1>Step 5: Company domain resolver</h1>
       <p>Done when: the company's own domain is found, and directories such as LinkedIn, Crunchbase and ZoomInfo are never chosen. Try a company from your Step 3 results.</p>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -38,7 +38,6 @@ export default function Step5() {
           <option value="ae">UAE</option>
           <option value="us">United States</option>
         </select>
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="App password" style={{ padding: 8 }} aria-label="App password" />
         <button onClick={run} disabled={busy} style={{ padding: '8px 16px' }}>{busy ? 'Searching…' : 'Find website'}</button>
       </div>
       {error && <p role="alert" style={{ color: '#a3302b' }}>{error}</p>}

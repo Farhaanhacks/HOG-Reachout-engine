@@ -1,12 +1,26 @@
 import type { ReactNode } from 'react';
+import './globals.css';
+import { AuthGate } from '../components/auth-gate';
+import { Nav } from '../components/nav';
 
 export const metadata = { title: 'Humans of Globe Lead Engine' };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body style={{ fontFamily: 'system-ui, sans-serif', margin: 0, padding: '32px 16px', background: '#f5f7f8', color: '#13222d' }}>
-        <main style={{ maxWidth: 880, margin: '0 auto' }}>{children}</main>
+      <body>
+        <div className="shell">
+          <aside className="side">
+            <div className="brand">
+              <b>Humans of Globe</b>
+              <span>Lead engine</span>
+            </div>
+            <Nav />
+          </aside>
+          <main className="main">
+            <AuthGate>{children}</AuthGate>
+          </main>
+        </div>
       </body>
     </html>
   );

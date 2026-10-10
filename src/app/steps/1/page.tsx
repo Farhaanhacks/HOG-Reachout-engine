@@ -26,7 +26,7 @@ export default function Step1() {
 
   return (
     <>
-      <p><Link href="/">Back to steps</Link></p>
+      <p><Link href="/tools">Back to tools</Link></p>
       <h1>Step 1: Serper search by country</h1>
       <p>Done when: 10 results come back for the UAE and for the US, and they differ.</p>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -35,7 +35,6 @@ export default function Step1() {
           <option value="ae">UAE</option>
           <option value="us">United States</option>
         </select>
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="App password" style={{ padding: 8 }} aria-label="App password" />
         <button onClick={run} disabled={busy} style={{ padding: '8px 16px' }}>{busy ? 'Searching…' : 'Search'}</button>
       </div>
       {error && <p role="alert" style={{ color: '#a3302b' }}>{error}</p>}

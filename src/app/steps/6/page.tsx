@@ -56,7 +56,7 @@ export default function Step6() {
 
   return (
     <>
-      <p><Link href="/">Back to steps</Link></p>
+      <p><Link href="/tools">Back to tools</Link></p>
       <h1>Step 6: Dedupe and store</h1>
       <p>Done when: running the same search twice saves nobody the second time ("0 new, N already saved"), and each LinkedIn profile appears once.</p>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -65,7 +65,6 @@ export default function Step6() {
           <option value="ae">UAE</option>
           <option value="us">United States</option>
         </select>
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="App password" style={{ padding: 8 }} aria-label="App password" />
         <button onClick={run} disabled={busy} style={{ padding: '8px 16px' }}>{busy ? 'Working…' : 'Search and save'}</button>
         <button onClick={show} disabled={busy} style={{ padding: '8px 16px' }}>Show saved</button>
       </div>

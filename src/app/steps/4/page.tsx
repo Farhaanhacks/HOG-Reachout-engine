@@ -20,7 +20,7 @@ export default function Step4() {
 
   return (
     <>
-      <p><Link href="/">Back to steps</Link></p>
+      <p><Link href="/tools">Back to tools</Link></p>
       <h1>Step 4: Title normaliser and seniority tag</h1>
       <p>Done when: "Co-Founder &amp; CEO" is a founder and C-suite target, and "Former CEO" or "Chief of Staff" is not. One title per line; add <code>| Company</code> to test fund detection.</p>
       <textarea value={text} onChange={(e) => setText(e.target.value)} rows={8} style={{ width: '100%', boxSizing: 'border-box', padding: 8, fontFamily: 'inherit' }} aria-label="Titles" />

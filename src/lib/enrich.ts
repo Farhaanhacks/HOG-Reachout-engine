@@ -4,6 +4,11 @@ import { ensureSchema, type Db, type SavedPerson } from './store';
 
 export const DEFAULT_DAILY_LIMIT = 100;
 
+/** The daily cap on Apollo lookups: APOLLO_DAILY_LIMIT, or 100. */
+export function dailyLimitFromEnv(): number {
+  return Math.max(1, Number(process.env.APOLLO_DAILY_LIMIT) || DEFAULT_DAILY_LIMIT);
+}
+
 /** Who is worth a lookup: target people not based elsewhere, never looked up before, oldest first. */
 export async function pendingPeople(db: Db, limit: number): Promise<SavedPerson[]> {
   await ensureSchema(db);

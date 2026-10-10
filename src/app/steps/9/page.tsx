@@ -59,11 +59,10 @@ export default function Step9() {
 
   return (
     <>
-      <p><Link href="/">Back to steps</Link></p>
+      <p><Link href="/tools">Back to tools</Link></p>
       <h1>Step 9: Apollo emails</h1>
       <p>Done when: saved target people get an email from Apollo, each person is looked up once, and the daily cap stops the run. "Preview" spends nothing. "Enrich" spends Apollo credits.</p>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="App password" style={{ padding: 8 }} aria-label="App password" />
         <button onClick={() => act(refresh)} disabled={busy} style={{ padding: '8px 16px' }}>Show status</button>
         <label>People to look up <input type="number" min={1} max={100} value={limit} onChange={(e) => setLimit(Number(e.target.value))} style={{ width: 70, padding: 6 }} /></label>
         <button onClick={doPreview} disabled={busy} style={{ padding: '8px 16px' }}>Preview (free)</button>

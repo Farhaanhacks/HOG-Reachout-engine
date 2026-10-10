@@ -17,7 +17,7 @@ export default function Step2() {
 
   return (
     <>
-      <p><Link href="/">Back to steps</Link></p>
+      <p><Link href="/tools">Back to tools</Link></p>
       <h1>Step 2: Query builder</h1>
       <p>Done when: a brief gives distinct <code>site:linkedin.com/in</code> queries per title group and city. Copy one into Step 1 or Step 3 to try it.</p>
       <div style={{ display: 'grid', gap: 8 }}>
