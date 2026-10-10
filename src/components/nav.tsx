@@ -8,6 +8,7 @@ const LINKS = [
   { href: '/run', label: 'Find leads' },
   { href: '/leads', label: 'Leads' },
   { href: '/emails', label: 'Emails (Apollo)' },
+  { href: '/outreach', label: 'Outreach (Instantly)' },
   { href: '/tools', label: 'Tools' },
 ];
 

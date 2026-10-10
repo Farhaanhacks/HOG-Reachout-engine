@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
+import { geoShort } from '../../../lib/geo';
 import type { SavedPerson } from '../../../lib/store';
 
 type Summary = { found: number; excludedOutsideCountry: number; inserted: number; updated: number };
@@ -90,7 +91,7 @@ export default function Step6() {
                     <td style={cell}>{p.title || '—'}</td>
                     <td style={cell}>{p.company || '—'}</td>
                     <td style={cell}>{p.labels || '—'}</td>
-                    <td style={cell}>{p.geo === 'ae' ? 'UAE' : 'US'} ({p.geo_match})</td>
+                    <td style={cell}>{geoShort(p.geo)} ({p.geo_match})</td>
                     <td style={cell}>{p.seen_count}×</td>
                     <td style={cell}><a href={p.linkedin_url}>open</a></td>
                   </tr>

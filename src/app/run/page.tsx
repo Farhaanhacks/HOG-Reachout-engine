@@ -83,7 +83,7 @@ export default function RunPage() {
     setError('');
     try {
       const d = await api<{ run: Run }>('/api/runs', post({ maxQueries: size, pages: 2 }));
-      say(`Started: ${d.run.queries.length} searches across the UAE and the US.`);
+      say(`Started: ${d.run.queries.length} searches across the UAE, the US, the UK and Canada.`);
       await drive(d.run, withApollo ? apolloLimit : null);
     } catch (e) {
       setError((e as Error).message);
@@ -103,7 +103,7 @@ export default function RunPage() {
       <div className="page-head">
         <div>
           <h1>Find leads</h1>
-          <p className="sub">One click finds successful people in the UAE and the US: the founder, CEO or managing director of a company, and the CIO or managing partner of a fund. Each run searches somewhere new, so running it again keeps finding new people.</p>
+          <p className="sub">One click finds successful people in the UAE, the US, the UK and Canada: the founder, CEO or managing director of a company, and the CIO or managing partner of a fund. Each run searches somewhere new, so running it again keeps finding new people.</p>
         </div>
       </div>
 
@@ -137,7 +137,7 @@ export default function RunPage() {
 
         <section className="card">
           <h2>Who we look for</h2>
-          <p className="muted small">Successful people who lead a company, in the <b>UAE</b> and the <b>United States</b>. People based anywhere else are skipped.</p>
+          <p className="muted small">Successful people who lead a company, in the <b>UAE</b>, the <b>United States</b>, the <b>United Kingdom</b> and <b>Canada</b>, at companies of about 25 to 10,000 employees. People based anywhere else are skipped.</p>
           <div className="chips">
             {ALL_TITLES.map((t) => <span key={t} className="chip">{t}</span>)}
           </div>

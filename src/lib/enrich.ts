@@ -1,6 +1,7 @@
 import { bulkMatch, type ApolloInput, type ApolloMatch } from './apollo';
 import type { Services } from './services';
-import { ensureSchema, type Db, type SavedPerson } from './store';
+import { sizeVerdict } from './size';
+import { READY_SQL, ensureSchema, type Db, type SavedPerson } from './store';
 
 export const DEFAULT_DAILY_LIMIT = 100;
 
@@ -14,7 +15,7 @@ export async function pendingPeople(db: Db, limit: number): Promise<SavedPerson[
   await ensureSchema(db);
   return db.query<SavedPerson>(
     `SELECT id, linkedin_url, name, title, company, location, geo, geo_match, labels, is_target, inferred, status, seen_count, first_seen, last_seen,
-            email, email_status, apollo_status, apollo_confidence, apollo_tier, rank
+            email, email_status, apollo_status, apollo_confidence, apollo_tier, rank, company_employees, company_size
      FROM people
      WHERE is_target = TRUE AND geo_match <> 'other' AND apollo_status = 'none'
      ORDER BY COALESCE(rank, 3) ASC, first_seen ASC, id ASC LIMIT $1`,
@@ -37,7 +38,7 @@ export async function enrichStatus(db: Db, dailyLimit = DEFAULT_DAILY_LIMIT): Pr
   const [p] = await db.query<{ pending: number; checked: number; with_email: number }>(
     `SELECT count(*) FILTER (WHERE is_target AND geo_match <> 'other' AND apollo_status = 'none')::int AS pending,
             count(*) FILTER (WHERE apollo_status <> 'none')::int AS checked,
-            count(*) FILTER (WHERE apollo_status IN ('matched', 'low_confidence'))::int AS with_email
+            count(*) FILTER (WHERE ${READY_SQL})::int AS with_email
      FROM people`,
   );
   const [t] = await db.query<{ used: number; credits: number }>(
@@ -69,9 +70,10 @@ async function save(db: Db, p: SavedPerson, m: ApolloMatch | null, tier: number)
   const status = statusOf(m);
   await db.query(
     `UPDATE people SET email = $2, email_status = $3, apollo_status = $4, apollo_confidence = $5, apollo_tier = $6, apollo_checked_at = now(),
-       title = COALESCE(NULLIF(title, ''), $7), company = COALESCE(NULLIF(company, ''), $8)
+       title = COALESCE(NULLIF(title, ''), $7), company = COALESCE(NULLIF(company, ''), $8),
+       company_employees = $9, company_size = $10
      WHERE id = $1`,
-    [p.id, m?.email ?? '', m?.email ? m.emailStatus : '', status, m?.confidence ?? '', tier, m?.title ?? '', m?.company ?? ''],
+    [p.id, m?.email ?? '', m?.email ? m.emailStatus : '', status, m?.confidence ?? '', tier, m?.title ?? '', m?.company ?? '', m?.org?.employees ?? null, sizeVerdict(m?.org)],
   );
 }
 
@@ -130,8 +132,8 @@ export async function runEnrichment(svc: Services, db: Db, opts: { limit: number
     if (!r) continue;
     sent++;
     if (r.m) matched++;
-    // Low-confidence emails are still sent to: the team decided to reach them too.
-    if (r.m?.email) withEmail++;
+    // Low-confidence emails are still sent to (the team decided to reach them too); companies outside 25–10,000 employees are not.
+    if (r.m?.email && !['too_small', 'too_large'].includes(sizeVerdict(r.m.org))) withEmail++;
     await save(db, p, r.m, r.tier);
   }
   if (sent) await db.query('INSERT INTO enrichment_log (requested, matched, with_email, credits) VALUES ($1, $2, $3, $4)', [sent, matched, withEmail, credits]);

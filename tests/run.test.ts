@@ -72,9 +72,9 @@ describe('createRun', () => {
 
   it('covers every type of lead in both countries by default', async () => {
     const run = await createRun(db, {}, { maxQueries: 60 });
-    expect(run.brief.geos).toEqual(['ae', 'us']);
+    expect(run.brief.geos).toEqual(['ae', 'us', 'uk', 'ca']);
     expect(run.brief.segments.length).toBeGreaterThanOrEqual(7);
-    expect(new Set(run.queries.map((q) => q.geo))).toEqual(new Set(['ae', 'us']));
+    expect(new Set(run.queries.map((q) => q.geo))).toEqual(new Set(['ae', 'us', 'uk', 'ca']));
   });
 
   it('picks searches no earlier run made, then goes deeper into ones already read', async () => {

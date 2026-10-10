@@ -77,14 +77,26 @@ export function parseSubtitle(subtitle: string | undefined): { location: string;
 
 const UAE_PLACES = /united arab emirates|\buae\b|dubai|abu dhabi|sharjah|ajman|ras al[- ]khaimah|fujairah|umm al[- ]quwain|الإمارات|دبي|أبوظبي|الشارقة/i;
 const US_PLACES = /united states|\busa\b|\bu\.s\.|,\s*(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|MA|MD|ME|MI|MN|MO|MS|MT|NC|ND|NE|NH|NJ|NM|NV|NY|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VA|VT|WA|WI|WV|WY|DC)\b|alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|wisconsin|wyoming|bay area|los angeles|san francisco|san diego|san jose|chicago|houston|miami|boston|seattle|austin|dallas|atlanta|denver|las vegas|philadelphia|phoenix|nashville|brooklyn/i;
-const OTHER_PLACES = /india|pakistan|bangladesh|sri lanka|nepal|united kingdom|\buk\b|england|scotland|london|manchester|ireland|germany|france|paris|italy|spain|portugal|netherlands|belgium|switzerland|zurich|geneva|sweden|norway|denmark|finland|poland|turkey|russia|ukraine|saudi|riyadh|jeddah|qatar|doha|oman|muscat|kuwait|bahrain|egypt|cairo|jordan|lebanon|israel|canada|toronto|vancouver|montreal|mexico|brazil|argentina|australia|sydney|melbourne|singapore|malaysia|indonesia|philippines|thailand|china|hong kong|japan|tokyo|korea|south africa|nigeria|kenya|lagos|nairobi/i;
+const UK_PLACES = /united kingdom|\buk\b|england|scotland|(?<!new south )wales|northern ireland|london|manchester|birmingham|edinburgh|glasgow|leeds|liverpool|bristol/i;
+const CA_PLACES = /canada|ontario|quebec|québec|british columbia|alberta|nova scotia|manitoba|saskatchewan|toronto|vancouver|montreal|montréal|calgary|ottawa|edmonton|mississauga/i;
+const OTHER_PLACES = /india|pakistan|bangladesh|sri lanka|nepal|ireland|germany|france|paris|italy|spain|portugal|netherlands|belgium|switzerland|zurich|geneva|sweden|norway|denmark|finland|poland|turkey|russia|ukraine|saudi|riyadh|jeddah|qatar|doha|oman|muscat|kuwait|bahrain|egypt|cairo|jordan|lebanon|israel|mexico|brazil|argentina|australia|sydney|melbourne|singapore|malaysia|indonesia|philippines|thailand|china|hong kong|japan|tokyo|korea|south africa|nigeria|kenya|lagos|nairobi/i;
+
+const PLACES: Record<Geo, RegExp> = { ae: UAE_PLACES, us: US_PLACES, uk: UK_PLACES, ca: CA_PLACES };
+/** Country names settle it when present: "London, Ontario, Canada" is in Canada, not the UK. */
+const COUNTRY_NAMES: Record<Geo, RegExp> = {
+  ae: /united arab emirates|\buae\b|الإمارات/i,
+  us: /united states|\busa\b/i,
+  uk: /united kingdom|\buk\b|england|scotland|(?<!new south )wales|northern ireland/i,
+  ca: /canada/i,
+};
 
 /** Is the profile's location in the country we searched? "San Francisco Bay Area" is 'other' for the UAE. */
 export function geoMatch(location: string, geo: Geo): Person['geoMatch'] {
   if (!location) return 'unknown';
-  const here = geo === 'ae' ? UAE_PLACES : US_PLACES;
-  if (here.test(location)) return 'match';
-  const elsewhere = geo === 'ae' ? [US_PLACES, OTHER_PLACES] : [UAE_PLACES, OTHER_PLACES];
+  const named = (Object.keys(COUNTRY_NAMES) as Geo[]).filter((g) => COUNTRY_NAMES[g].test(location));
+  if (named.length) return named.includes(geo) ? 'match' : 'other';
+  if (PLACES[geo].test(location)) return 'match';
+  const elsewhere = [...(Object.keys(PLACES) as Geo[]).filter((g) => g !== geo).map((g) => PLACES[g]), OTHER_PLACES];
   return elsewhere.some((re) => re.test(location)) ? 'other' : 'unknown';
 }
 
@@ -100,7 +112,7 @@ function roleFromHint(hint: string): string {
   return hint.split(/[,/&]/).map((p) => p.trim()).filter((p) => p && p.length <= 40 && JOB_WORD.test(p)).slice(0, 2).join(' & ');
 }
 
-const PLACE_ONLY = /^(greater\s+)?(dubai|abu dhabi|sharjah|ajman|ras al[- ]khaimah|fujairah|umm al[- ]quwain|united arab emirates|uae|new york( city)?|san francisco|los angeles|miami|chicago|boston|austin|houston|dallas|seattle|atlanta|denver|san diego|united states|usa)(\s+bay)?(\s+metropolitan)?(\s+area)?$/i;
+const PLACE_ONLY = /^(greater\s+)?(dubai|abu dhabi|sharjah|ajman|ras al[- ]khaimah|fujairah|umm al[- ]quwain|united arab emirates|uae|new york( city)?|san francisco|los angeles|miami|chicago|boston|austin|houston|dallas|seattle|atlanta|denver|san diego|united states|usa|london|manchester|birmingham|edinburgh|united kingdom|uk|toronto|vancouver|montreal|calgary|canada)(\s+bay)?(\s+metropolitan)?(\s+area)?$/i;
 
 /** Is the whole text just a place ("Dubai", "Dubai, United Arab Emirates")? "Dubai Technologies" is not. */
 export function placeOnly(text: string): boolean {
@@ -133,7 +145,7 @@ export function roleFromSnippet(snippet: string): { title: string; company: stri
 export function locationFromSnippet(snippet: string): string {
   const labelled = /location:\s*([^·|.\n]{2,60})/i.exec(snippet);
   if (labelled) return labelled[1].trim();
-  const named = /\b([A-Z][A-Za-z.'-]+(?:\s[A-Z][A-Za-z.'-]+){0,2},\s*(?:United Arab Emirates|UAE|United States|USA))\b/.exec(snippet);
+  const named = /\b([A-Z][A-Za-z.'-]+(?:\s[A-Z][A-Za-z.'-]+){0,2},\s*(?:United Arab Emirates|UAE|United States|USA|United Kingdom|UK|Canada))\b/.exec(snippet);
   return named ? named[1].trim() : '';
 }
 

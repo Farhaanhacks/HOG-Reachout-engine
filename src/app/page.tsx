@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { CountryBadge, EmailBadge, RunBadge } from '../components/badges';
 import { api, countryName, formatDate } from '../lib/client';
 import type { EnrichStatus } from '../lib/enrich';
+import { GEOS, GEO_LIST } from '../lib/geo';
 import type { Run } from '../lib/run';
 import type { SavedPerson } from '../lib/store';
 
@@ -34,7 +35,7 @@ export default function OverviewPage() {
       <div className="page-head">
         <div>
           <h1>Overview</h1>
-          <p className="sub">Successful people in the UAE and the US, their LinkedIn profiles, and the emails Apollo has found for them.</p>
+          <p className="sub">Successful people in the UAE, the US, the UK and Canada, their LinkedIn profiles, and the emails Apollo has found for them.</p>
         </div>
         <Link href="/run" className="btn primary big">Find leads</Link>
       </div>
@@ -44,8 +45,7 @@ export default function OverviewPage() {
       <div className="stats">
         <div className="stat"><div className="n">{n(data && sum(data.people, 'total'))}</div><div className="l">People saved</div></div>
         <div className="stat"><div className="n">{n(data && sum(data.people, 'main'))}</div><div className="l">Main decision-makers</div></div>
-        <div className="stat"><div className="n">{n(byGeo('ae')?.total ?? 0)}</div><div className="l">In the UAE</div></div>
-        <div className="stat"><div className="n">{n(byGeo('us')?.total ?? 0)}</div><div className="l">In the US</div></div>
+        {GEO_LIST.map((g) => <div key={g} className="stat"><div className="n">{n(byGeo(g)?.total ?? 0)}</div><div className="l">In {g === 'ca' ? '' : 'the '}{GEOS[g].short}</div></div>)}
         <Link href="/leads?ready=1" className="stat stat-link"><div className="n">{n(data?.enrich.withEmail)}</div><div className="l">Emails ready →</div></Link>
         <div className="stat"><div className="n">{n(data ? `${data.enrich.usedToday}/${data.enrich.dailyLimit}` : '')}</div><div className="l">Apollo lookups today</div></div>
       </div>

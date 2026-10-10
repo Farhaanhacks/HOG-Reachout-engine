@@ -1,4 +1,5 @@
 import type { Services } from './services';
+import type { CompanyFacts } from './size';
 import { getJson } from './services';
 
 /** What we know about a person, used to ask Apollo who they are. */
@@ -14,6 +15,8 @@ export type ApolloMatch = {
   title: string;
   company: string;
   linkedin: string;
+  /** Size facts about the person's company, when Apollo returned its organization. */
+  org?: CompanyFacts;
 };
 
 type ApolloPerson = {
@@ -22,7 +25,18 @@ type ApolloPerson = {
   match_confidence?: string | null;
   title?: string | null;
   linkedin_url?: string | null;
-  organization?: { name?: string | null } | null;
+  organization?: {
+    name?: string | null;
+    estimated_num_employees?: number | string | null;
+    annual_revenue?: number | string | null;
+    total_funding?: number | string | null;
+    publicly_traded_symbol?: string | null;
+  } | null;
+};
+
+const num = (v: unknown): number | null => {
+  const n = Number(v);
+  return v != null && v !== '' && Number.isFinite(n) && n > 0 ? n : null;
 };
 
 type BulkResponse = { matches?: (ApolloPerson | null)[]; credits_consumed?: number | string };
@@ -63,6 +77,14 @@ export function parseMatch(p: ApolloPerson | null | undefined): ApolloMatch | nu
     title: p.title ?? '',
     company: p.organization?.name ?? '',
     linkedin: p.linkedin_url ?? '',
+    org: p.organization
+      ? {
+          employees: num(p.organization.estimated_num_employees),
+          revenue: num(p.organization.annual_revenue),
+          funding: num(p.organization.total_funding),
+          publicCompany: !!p.organization.publicly_traded_symbol,
+        }
+      : undefined,
   };
 }
 

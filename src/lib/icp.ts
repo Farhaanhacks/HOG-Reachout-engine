@@ -2,7 +2,7 @@ import type { Geo } from './geo';
 import { buildQueries } from './queries';
 
 /**
- * Humans of Globe's ideal customer: the main decision-maker of a company, in the UAE and the US. Each segment names the
+ * Humans of Globe's ideal customer: the main decision-maker of a company (about 25–10,000 employees), in the UAE, the US, the UK and Canada. Each segment names the
  * titles that are "the main person" for that kind of company: a CEO or founder at a company, a CIO or managing partner
  * at a fund.
  */
@@ -31,7 +31,7 @@ export const SEGMENTS: Segment[] = [
 ];
 
 export const DEFAULT_SEGMENTS = ['leaders', 'startups', 'hedge'];
-export const DEFAULT_GEOS: Geo[] = ['ae', 'us'];
+export const DEFAULT_GEOS: Geo[] = ['ae', 'us', 'uk', 'ca'];
 
 export function segmentById(id: string): Segment | undefined {
   return SEGMENTS.find((s) => s.id === id);

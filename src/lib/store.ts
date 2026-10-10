@@ -38,7 +38,21 @@ export async function ensureSchema(db: Db): Promise<void> {
     ADD COLUMN IF NOT EXISTS apollo_confidence TEXT NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS apollo_tier INTEGER NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS apollo_checked_at TIMESTAMPTZ,
-    ADD COLUMN IF NOT EXISTS rank INTEGER`);
+    ADD COLUMN IF NOT EXISTS rank INTEGER,
+    ADD COLUMN IF NOT EXISTS company_employees INTEGER,
+    ADD COLUMN IF NOT EXISTS company_size TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS instantly_status TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS instantly_lead_id TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS instantly_campaign_id TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS instantly_at TIMESTAMPTZ`);
+  await db.query(`CREATE TABLE IF NOT EXISTS outreach_log (
+    id BIGSERIAL PRIMARY KEY,
+    ran_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    campaign_id TEXT NOT NULL,
+    requested INTEGER NOT NULL,
+    added INTEGER NOT NULL,
+    skipped INTEGER NOT NULL
+  )`);
   // People saved before ranks existed get one from their title (a small, one-off pass).
   const unranked = await db.query<{ id: number | string; title: string; company: string }>('SELECT id, title, company FROM people WHERE rank IS NULL LIMIT 5000');
   for (const r of unranked) {
@@ -156,7 +170,20 @@ export type SavedPerson = {
   apollo_tier: number;
   /** 1 = the main person of the company, 2 = other C-suite or partner, 3 = other. */
   rank: number | null;
+  /** Employees at their company, from Apollo, when known. */
+  company_employees: number | null;
+  /** fit, big_enough, too_small, too_large, unknown, or '' before Apollo (see size.ts). */
+  company_size: string;
+  /** '' = not sent; 'added' = in an Instantly campaign; 'skipped' = Instantly declined (already there, invalid, blocklisted). */
+  instantly_status?: string;
+  instantly_at?: string | null;
 };
+
+/**
+ * Who has an email to send to: a confident or low-confidence Apollo email, at a company not known to be outside
+ * 25–10,000 employees. Companies of unknown size are kept.
+ */
+export const READY_SQL = `apollo_status IN ('matched', 'low_confidence') AND company_size NOT IN ('too_small', 'too_large')`;
 
 export type ListOptions = {
   geo?: Geo;
@@ -181,7 +208,7 @@ export async function listPeople(db: Db, opts: ListOptions = {}): Promise<SavedP
     where.push(`geo = $${params.length}`);
   }
   if (opts.targetOnly) where.push('is_target = TRUE');
-  if (opts.ready) where.push(`apollo_status IN ('matched', 'low_confidence')`);
+  if (opts.ready) where.push(READY_SQL);
   if (opts.topOnly) where.push('rank = 1');
   if (opts.q?.trim()) {
     params.push(`%${opts.q.trim()}%`);
@@ -191,7 +218,7 @@ export async function listPeople(db: Db, opts: ListOptions = {}): Promise<SavedP
   params.push(Math.min(Math.max(opts.limit ?? 200, 1), 1000));
   return db.query<SavedPerson>(
     `SELECT id, linkedin_url, name, title, company, location, geo, geo_match, labels, is_target, inferred, status, seen_count, first_seen, last_seen,
-            email, email_status, apollo_status, apollo_confidence, apollo_tier, rank
+            email, email_status, apollo_status, apollo_confidence, apollo_tier, rank, company_employees, company_size, instantly_status, instantly_at
      FROM people ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
      ORDER BY ${opts.orderBy === 'emails' ? 'apollo_checked_at DESC NULLS LAST,' : ''} first_seen DESC, id DESC LIMIT $${params.length}`,
     params,

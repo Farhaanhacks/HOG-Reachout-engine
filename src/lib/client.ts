@@ -1,3 +1,5 @@
+import { geoShort } from './geo';
+
 /** Calls one of the app's API routes from the browser. The login cookie goes along automatically. Throws with the server's message. */
 export async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } });
@@ -9,11 +11,7 @@ export async function api<T>(url: string, init?: RequestInit): Promise<T> {
 export const post = (body: unknown = {}): RequestInit => ({ method: 'POST', body: JSON.stringify(body) });
 
 /** "ae" gives "UAE"; "ae,us" gives "UAE + US". */
-export const countryName = (geo: string) =>
-  geo
-    .split(',')
-    .map((g) => (g === 'ae' ? 'UAE' : g === 'us' ? 'US' : g))
-    .join(' + ');
+export const countryName = (geo: string) => geo.split(',').map(geoShort).join(' + ');
 
 export function formatDate(value: string | null | undefined): string {
   if (!value) return '—';

@@ -19,6 +19,9 @@ Stack: TypeScript, Next.js 16, React 19, Vitest.
    | `DATABASE_URL` | yes (step 6) | Postgres connection string (Supabase: Transaction pooler) |
    | `APOLLO_API_KEY` | yes (step 9) | Apollo API key; needs a plan with API access |
    | `APOLLO_DAILY_LIMIT` | optional | Most people sent to Apollo per day (default 100) |
+   | `INSTANTLY_API_KEY` | yes (step 10) | Instantly API key, allowed to read campaigns and create leads |
+   | `INSTANTLY_CAMPAIGN_ID` | optional | Campaign chosen by default on the Outreach page |
+   | `INSTANTLY_DAILY_LIMIT` | optional | Most leads sent to Instantly per day (default 500) |
    | `JINA_API_KEY` | later | Used from step 5 |
    | `DEEPSEEK_API_KEY` | later | Used from step 4 onward |
 

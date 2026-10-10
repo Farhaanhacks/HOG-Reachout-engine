@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server';
 import { checkPassword } from '../../../../lib/auth';
 import { toCsv } from '../../../../lib/csv';
 import { getDb } from '../../../../lib/db';
+import { geoShort } from '../../../../lib/geo';
 import { filtersFrom } from '../../../../lib/lead-filters';
+import { draftEmail } from '../../../../lib/pitch';
 import { listPeople } from '../../../../lib/store';
 
 export const dynamic = 'force-dynamic';
@@ -14,8 +16,11 @@ export async function GET(req: Request) {
   try {
     const people = await listPeople(getDb(), { ...filtersFrom(new URL(req.url)), limit: 1000 });
     const csv = toCsv(
-      ['Name', 'Title', 'Company', 'Location', 'Country', 'Labels', 'LinkedIn', 'Email', 'Email status', 'Apollo result', 'Apollo confidence', 'First seen'],
-      people.map((p) => [p.name, p.title, p.company, p.location, p.geo === 'ae' ? 'UAE' : 'US', p.labels, p.linkedin_url, p.email, p.email_status, p.apollo_status, p.apollo_confidence, p.first_seen]),
+      ['Name', 'First name', 'Title', 'Company', 'Location', 'Country', 'Labels', 'LinkedIn', 'Email', 'Email status', 'Apollo result', 'Apollo confidence', 'Employees', 'Company size', 'Email subject', 'Email body', 'First seen'],
+      people.map((p) => {
+        const d = draftEmail(p);
+        return [p.name, d.firstName, p.title, p.company, p.location, geoShort(p.geo), p.labels, p.linkedin_url, p.email, p.email_status, p.apollo_status, p.apollo_confidence, p.company_employees ?? '', p.company_size, d.subject, d.body, p.first_seen];
+      }),
     );
     return new Response(csv, {
       headers: {

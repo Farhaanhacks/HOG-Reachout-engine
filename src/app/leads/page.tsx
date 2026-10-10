@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { CountryBadge, EmailBadge, RankBadge } from '../../components/badges';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import { CountryBadge, EmailBadge, RankBadge, SizeBadge } from '../../components/badges';
 import { api, formatDate } from '../../lib/client';
+import { GEOS, GEO_LIST } from '../../lib/geo';
+import { draftEmail } from '../../lib/pitch';
 import type { SavedPerson } from '../../lib/store';
 
 /** Filters a link can set, e.g. /leads?ready=1 from the Overview's "Emails ready". */
@@ -17,6 +19,7 @@ export default function LeadsPage() {
   const [query, setQuery] = useState('');
   const [people, setPeople] = useState<SavedPerson[] | null>(null);
   const [error, setError] = useState('');
+  const [openDraft, setOpenDraft] = useState('');
 
   const params = useMemo(() => {
     const p = new URLSearchParams();
@@ -59,9 +62,8 @@ export default function LeadsPage() {
         <div className="row">
           <input id="leads-search" placeholder="Search name, title or company" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: '1 1 260px' }} aria-label="Search" />
           <select id="leads-geo" value={geo} onChange={(e) => setGeo(e.target.value)} aria-label="Country">
-            <option value="">Both countries</option>
-            <option value="ae">UAE</option>
-            <option value="us">US</option>
+            <option value="">All countries</option>
+            {GEO_LIST.map((g) => <option key={g} value={g}>{GEOS[g].label}</option>)}
           </select>
           <select id="leads-who" value={who} onChange={(e) => setWho(e.target.value as 'top' | 'targets' | 'all')} aria-label="Who">
             <option value="top">Main person of each company</option>
@@ -75,22 +77,42 @@ export default function LeadsPage() {
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Name</th><th>Title</th><th>Company</th><th>Country</th><th>Email</th><th>Found</th></tr>
+              <tr><th>Name</th><th>Title</th><th>Company</th><th>Country</th><th>Email</th><th>Found</th><th></th></tr>
             </thead>
             <tbody>
-              {people?.map((p) => (
-                <tr key={String(p.id)}>
-                  <td><a href={p.linkedin_url} target="_blank" rel="noreferrer">{p.name}</a></td>
-                  <td>{p.title || <span className="muted">—</span>} <RankBadge rank={p.rank} /></td>
-                  <td>{p.company || <span className="muted">—</span>}</td>
-                  <td><CountryBadge geo={p.geo} match={p.geo_match} /></td>
-                  <td>
-                    {p.email ? <div>{p.email}</div> : null}
-                    <EmailBadge status={p.apollo_status} />
-                  </td>
-                  <td className="small muted">{formatDate(p.first_seen)}</td>
-                </tr>
-              ))}
+              {people?.map((p) => {
+                const open = openDraft === String(p.id);
+                const d = open ? draftEmail(p) : null;
+                return (
+                  <Fragment key={String(p.id)}>
+                    <tr>
+                      <td><a href={p.linkedin_url} target="_blank" rel="noreferrer">{p.name}</a></td>
+                      <td>{p.title || <span className="muted">—</span>} <RankBadge rank={p.rank} /></td>
+                      <td>
+                        {p.company || <span className="muted">—</span>}
+                        <div><SizeBadge size={p.company_size} employees={p.company_employees} /></div>
+                      </td>
+                      <td><CountryBadge geo={p.geo} match={p.geo_match} /></td>
+                      <td>
+                        {p.email ? <div>{p.email}</div> : null}
+                        <EmailBadge status={p.apollo_status} /> {p.instantly_status === 'added' && <span className="badge ok">In Instantly</span>}
+                      </td>
+                      <td className="small muted">{formatDate(p.first_seen)}</td>
+                      <td><button className="link small" onClick={() => setOpenDraft(open ? '' : String(p.id))}>{open ? 'Hide email' : 'Email draft'}</button></td>
+                    </tr>
+                    {d && (
+                      <tr>
+                        <td colSpan={7}>
+                          <div className="draft">
+                            <div><span className="muted small">Subject</span> <b>{d.subject}</b></div>
+                            <pre>{d.body}</pre>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
           {people && !people.length && <p className="empty">No one matches these filters.</p>}
