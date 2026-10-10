@@ -57,11 +57,47 @@ describe('createRun', () => {
   it('plans searches for both countries from the chosen types', async () => {
     const run = await createRun(db, { geos: ['ae', 'us'], segments: ['hedge'] }, { maxQueries: 3 });
     expect(run.queries).toHaveLength(3);
-    expect(run.queries[0]).toEqual({ query: 'site:linkedin.com/in ("Chief Investment Officer" OR "CIO" OR "Founder") "Dubai" "hedge fund"', geo: 'ae', segment: 'hedge' });
+    expect(run.queries[0]).toEqual({ query: 'site:linkedin.com/in ("Chief Investment Officer" OR "CIO" OR "Founder") "Dubai" "hedge fund"', geo: 'ae', segment: 'hedge', startPage: 1 });
     expect(run.queries[1]).toMatchObject({ geo: 'us', segment: 'hedge' });
     expect(run.geo).toBe('ae,us');
     expect(run.brief).toEqual({ geos: ['ae', 'us'], segments: ['hedge'], extraTitles: [] });
     expect(run).toMatchObject({ status: 'running', next_index: 0, pages: 2, searches: 0 });
+  });
+
+  it('covers every type of lead in both countries by default', async () => {
+    const run = await createRun(db, {}, { maxQueries: 60 });
+    expect(run.brief.geos).toEqual(['ae', 'us']);
+    expect(run.brief.segments.length).toBeGreaterThanOrEqual(7);
+    expect(new Set(run.queries.map((q) => q.geo))).toEqual(new Set(['ae', 'us']));
+  });
+
+  it('picks searches no earlier run made, then goes deeper into ones already read', async () => {
+    const full = Array.from({ length: 10 }, (_, i) => profile(`x${i}`));
+    const { svc } = fakeSerper(() => full);
+    const plan = { geos: ['ae' as const], segments: ['hedge'] }; // 8 searches in the UAE
+    const first = await createRun(db, plan, { maxQueries: 2 });
+    await runStep(svc, db, first.id);
+    await runStep(svc, db, first.id);
+
+    const second = await createRun(db, plan, { maxQueries: 2 });
+    expect(second.queries.map((q) => q.query)).not.toContain(first.queries[0].query);
+    expect(second.queries.map((q) => q.query)).not.toContain(first.queries[1].query);
+    expect(second.queries.every((q) => q.startPage === 1)).toBe(true);
+
+    const rest = await createRun(db, plan, { maxQueries: 6 });
+    for (let i = 0; i < 6; i++) await runStep(svc, db, rest.id);
+    for (let i = 0; i < 2; i++) await runStep(svc, db, second.id);
+    const deeper = await createRun(db, plan, { maxQueries: 8 });
+    expect(deeper.queries).toHaveLength(8);
+    expect(deeper.queries.every((q) => q.startPage === 3)).toBe(true); // each read 2 pages already
+  });
+
+  it('retires a search whose results ran out', async () => {
+    const { svc } = fakeSerper(() => [profile('a'), profile('b'), profile('c')]);
+    const plan = { geos: ['ae' as const], segments: ['hedge'] };
+    const run = await createRun(db, plan, { maxQueries: 8 });
+    for (let i = 0; i < 8; i++) await runStep(svc, db, run.id);
+    await expect(createRun(db, plan)).rejects.toThrow('Every search has already been read to the end');
   });
 
   it('refuses a run with no country or no type', async () => {
@@ -73,7 +109,7 @@ describe('createRun', () => {
     await ensureSchema(db);
     const [row] = await db.query<{ id: number }>(`INSERT INTO runs (geo, brief, queries) VALUES ('ae', '{"geo":"ae","titles":["CEO"]}', '["q1"]') RETURNING id`);
     const run = await getRun(db, row.id);
-    expect(run?.queries).toEqual([{ query: 'q1', geo: 'ae', segment: '' }]);
+    expect(run?.queries).toEqual([{ query: 'q1', geo: 'ae', segment: '', startPage: 1 }]);
     expect(run?.brief).toEqual({ geos: ['ae'], segments: [], extraTitles: ['CEO'] });
   });
 });

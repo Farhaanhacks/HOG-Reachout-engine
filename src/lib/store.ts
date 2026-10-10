@@ -75,6 +75,16 @@ export async function ensureSchema(db: Db): Promise<void> {
     status TEXT NOT NULL DEFAULT 'running',
     error TEXT NOT NULL DEFAULT ''
   )`);
+  // Every search ever made and how deep it has gone, so each run picks new searches (or the next result pages)
+  // instead of repeating the last run.
+  await db.query(`CREATE TABLE IF NOT EXISTS searched_queries (
+    geo TEXT NOT NULL,
+    query TEXT NOT NULL,
+    pages_done INTEGER NOT NULL DEFAULT 0,
+    exhausted BOOLEAN NOT NULL DEFAULT FALSE,
+    last_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (geo, query)
+  )`);
   ready.add(db);
 }
 
@@ -185,7 +195,11 @@ export async function listPeople(db: Db, opts: ListOptions = {}): Promise<SavedP
   );
 }
 
-export async function countPeople(db: Db): Promise<{ geo: string; total: number; targets: number }[]> {
+/** Per country: everyone saved, the target people, and the main person of each company (rank 1). */
+export async function countPeople(db: Db): Promise<{ geo: string; total: number; targets: number; main: number }[]> {
   await ensureSchema(db);
-  return db.query(`SELECT geo, count(*)::int AS total, count(*) FILTER (WHERE is_target)::int AS targets FROM people GROUP BY geo ORDER BY geo`);
+  return db.query(
+    `SELECT geo, count(*)::int AS total, count(*) FILTER (WHERE is_target)::int AS targets, count(*) FILTER (WHERE rank = 1)::int AS main
+     FROM people GROUP BY geo ORDER BY geo`,
+  );
 }

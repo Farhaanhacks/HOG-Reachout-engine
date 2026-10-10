@@ -73,8 +73,8 @@ describe('savePeople', () => {
     await savePeople(db, [cd()], 'us', 'q2');
     expect(await listPeople(db, { geo: 'us' })).toHaveLength(1);
     expect(await countPeople(db)).toEqual([
-      { geo: 'ae', total: 1, targets: 1 },
-      { geo: 'us', total: 1, targets: 1 },
+      { geo: 'ae', total: 1, targets: 1, main: 1 },
+      { geo: 'us', total: 1, targets: 1, main: 1 },
     ]);
   });
 });

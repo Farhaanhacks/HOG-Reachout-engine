@@ -1,12 +1,14 @@
 import { runEnrichment, type EnrichSummary } from './enrich';
 import { isGeo, type Geo } from './geo';
-import { planQueries, segmentById, type Plan, type PlannedQuery } from './icp';
+import { DEFAULT_GEOS, SEGMENTS, planQueries, segmentById, type Plan, type PlannedQuery } from './icp';
 import { parsePeople, type Person } from './linkedin';
 import { googleSearch, type Services } from './services';
 import { ensureSchema, savePeople, splitByCountry, type Db } from './store';
 
 export const MAX_QUERIES = 60;
 export const MAX_PAGES = 3;
+/** Google rarely has useful LinkedIn results past this page, so a search is retired once it gets here. */
+export const MAX_DEPTH = 5;
 
 type RunRow = {
   id: number | string;
@@ -32,21 +34,24 @@ type RunRow = {
 };
 
 export type RunBrief = { geos: Geo[]; segments: string[]; extraTitles: string[] };
+/** A search in a run, and the result page it starts at (later runs go deeper into the same search). */
+export type RunQuery = PlannedQuery & { startPage: number };
 
 /**
- * One full run: the ICP segments in each chosen country turned into searches, worked through one search per request (so
- * no request runs long enough to time out, and a closed tab can be continued), with a running tally of what was
- * searched, found and spent.
+ * One full run: the ICP's searches in both countries, worked through one search per request (so no request runs long
+ * enough to time out, and a closed tab can be continued), with a running tally of what was searched, found and spent.
  */
-export type Run = Omit<RunRow, 'brief' | 'queries' | 'apollo_credits'> & { brief: RunBrief; queries: PlannedQuery[]; apollo_credits: number };
+export type Run = Omit<RunRow, 'brief' | 'queries' | 'apollo_credits'> & { brief: RunBrief; queries: RunQuery[]; apollo_credits: number };
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(n) || lo));
 
-/** Reads a stored run, including runs saved before segments existed (one country, typed titles, plain query strings). */
+/** Reads a stored run, including runs saved in earlier formats (one country, typed titles, plain query strings). */
 function toRun(r: RunRow): Run {
   const brief = JSON.parse(r.brief) as Partial<RunBrief> & { geo?: Geo; titles?: string[] };
   const fallbackGeo = (r.geo.split(',')[0] || 'ae') as Geo;
-  const queries = (JSON.parse(r.queries) as (string | PlannedQuery)[]).map((q) => (typeof q === 'string' ? { query: q, geo: fallbackGeo, segment: '' } : q));
+  const queries = (JSON.parse(r.queries) as (string | Partial<RunQuery>)[]).map(
+    (q): RunQuery => (typeof q === 'string' ? { query: q, geo: fallbackGeo, segment: '', startPage: 1 } : { query: q.query ?? '', geo: q.geo ?? fallbackGeo, segment: q.segment ?? '', startPage: q.startPage ?? 1 }),
+  );
   return {
     ...r,
     brief: { geos: brief.geos ?? (brief.geo ? [brief.geo] : [fallbackGeo]), segments: brief.segments ?? [], extraTitles: brief.extraTitles ?? brief.titles ?? [] },
@@ -55,14 +60,31 @@ function toRun(r: RunRow): Run {
   };
 }
 
-export async function createRun(db: Db, plan: Plan, opts: { pages?: number; maxQueries?: number } = {}): Promise<Run> {
-  const geos = [...new Set(plan.geos)].filter(isGeo);
+/**
+ * Starts a run. By default it covers every type of lead in both countries. It picks searches never made before first,
+ * then the least-searched ones, starting each at the next unread result page, so every run looks somewhere new.
+ */
+export async function createRun(db: Db, plan: Partial<Plan> = {}, opts: { pages?: number; maxQueries?: number } = {}): Promise<Run> {
+  const geos = [...new Set(plan.geos ?? DEFAULT_GEOS)].filter(isGeo);
   if (!geos.length) throw new Error('Choose at least one country.');
-  const segments = [...new Set(plan.segments)].filter((s) => segmentById(s));
+  const segments = [...new Set(plan.segments ?? SEGMENTS.map((s) => s.id))].filter((s) => segmentById(s));
   if (!segments.length) throw new Error('Choose at least one type of lead.');
   const extraTitles = (plan.extraTitles ?? []).map((t) => t.trim()).filter(Boolean);
-  const queries = planQueries({ geos, segments, extraTitles }, clamp(opts.maxQueries ?? 20, 1, MAX_QUERIES));
   await ensureSchema(db);
+
+  const history = new Map<string, { pages: number; exhausted: boolean; at: number }>();
+  for (const h of await db.query<{ geo: string; query: string; pages_done: number; exhausted: boolean; at: number }>(
+    'SELECT geo, query, pages_done, exhausted, extract(epoch FROM last_at)::float8 AS at FROM searched_queries',
+  )) {
+    history.set(`${h.geo}|${h.query}`, { pages: h.pages_done, exhausted: h.exhausted, at: Number(h.at) || 0 });
+  }
+  const candidates = planQueries({ geos, segments, extraTitles })
+    .map((q, order) => ({ q, order, h: history.get(`${q.geo}|${q.query}`) ?? { pages: 0, exhausted: false, at: 0 } }))
+    .filter((c) => !c.h.exhausted && c.h.pages < MAX_DEPTH)
+    .sort((a, b) => a.h.pages - b.h.pages || a.h.at - b.h.at || a.order - b.order);
+  if (!candidates.length) throw new Error('Every search has already been read to the end. Add more types of lead or titles to find new people.');
+  const queries: RunQuery[] = candidates.slice(0, clamp(opts.maxQueries ?? 20, 1, MAX_QUERIES)).map((c) => ({ ...c.q, startPage: c.h.pages + 1 }));
+
   const brief: RunBrief = { geos, segments, extraTitles };
   const [row] = await db.query<RunRow>('INSERT INTO runs (geo, brief, queries, pages) VALUES ($1, $2, $3, $4) RETURNING *', [
     geos.join(','),
@@ -85,31 +107,42 @@ export async function listRuns(db: Db, limit = 20): Promise<Run[]> {
 }
 
 /**
- * Works through the run's next search: its result pages (stopping early when a page comes back short), the people in
- * them, minus those based outside that search's country, saved by LinkedIn URL. On a search failure the run is not
- * advanced, so the same search is tried again next time; searches already made are still counted, since they were charged.
+ * Works through the run's next search: its result pages from where earlier runs stopped (ending early when a page comes
+ * back short, which also retires the search), the people in them, minus those based outside that search's country,
+ * saved by LinkedIn URL. On a search failure the run is not advanced, so the same search is tried again next time;
+ * searches already made are still counted, since they were charged.
  */
 export async function runStep(svc: Services, db: Db, id: number | string): Promise<Run> {
   const run = await getRun(db, id);
   if (!run) throw new Error('Run not found');
   if (run.status !== 'running' || run.next_index >= run.queries.length) return run;
   const index = run.next_index;
-  const { query, geo, segment } = run.queries[index];
+  const { query, geo, segment, startPage } = run.queries[index];
   const byUrl = new Map<string, Person>();
   let searches = 0;
   let results = 0;
+  let exhausted = false;
   try {
-    for (let page = 1; page <= run.pages; page++) {
+    for (let page = startPage; page < startPage + run.pages; page++) {
       const res = await googleSearch(svc, query, geo, page);
       searches++;
       results += res.length;
       for (const p of parsePeople(res, geo)) if (!byUrl.has(p.linkedin)) byUrl.set(p.linkedin, p);
-      if (res.length < 10) break;
+      if (res.length < 10) {
+        exhausted = true;
+        break;
+      }
     }
   } catch (e) {
     await db.query('UPDATE runs SET searches = searches + $2, error = $3 WHERE id = $1', [id, searches, `Search ${index + 1}: ${(e as Error).message}`]);
     throw e;
   }
+  await db.query(
+    `INSERT INTO searched_queries (geo, query, pages_done, exhausted, last_at) VALUES ($1, $2, $3, $4, now())
+     ON CONFLICT (geo, query) DO UPDATE SET pages_done = GREATEST(searched_queries.pages_done, EXCLUDED.pages_done),
+       exhausted = searched_queries.exhausted OR EXCLUDED.exhausted, last_at = now()`,
+    [geo, query, startPage + searches - 1, exhausted],
+  );
   const { kept, excluded } = splitByCountry([...byUrl.values()]);
   const saved = await savePeople(db, kept, geo, query, { fundContext: !!segmentById(segment)?.fund });
   const [row] = await db.query<RunRow>(

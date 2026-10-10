@@ -53,7 +53,7 @@ code { font-family: var(--mono); font-size: 0.85em; background: var(--surface-2)
 .nav a:hover { background: var(--surface-2); color: var(--fg); text-decoration: none; }
 .nav a.active { background: var(--accent-soft); color: #cfe0fb; }
 .side-foot { margin-top: auto; padding: 0 12px; }
-.main { padding: 34px 40px 64px; width: 100%; max-width: 1260px; min-width: 0; }
+.main { padding: 36px 48px 64px; width: 100%; min-width: 0; }
 @media (max-width: 860px) {
   .shell { grid-template-columns: 1fr; }
   .side { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 14px 16px; gap: 12px; }
@@ -64,7 +64,19 @@ code { font-family: var(--mono); font-size: 0.85em; background: var(--surface-2)
 }
 
 /* Page structure */
-.page { display: flex; flex-direction: column; gap: 22px; }
+/* Pages use the full content width up to a comfortable maximum, centred, so wide screens are not left half empty. */
+.page { display: flex; flex-direction: column; gap: 22px; width: 100%; max-width: 1480px; margin: 0 auto; }
+.grid-run { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 1000px) { .grid-run { grid-template-columns: 1fr; } }
+.segmented { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.segmented button { flex-direction: column; align-items: flex-start; gap: 2px; padding: 14px 16px; background: var(--field); text-align: left; }
+.segmented button b { font-size: 1rem; }
+.segmented button span { color: var(--muted); font-weight: 500; font-size: 0.82rem; }
+.segmented button.on { border-color: var(--accent); background: var(--accent-soft); }
+@media (max-width: 520px) { .segmented { grid-template-columns: 1fr; } }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { padding: 5px 11px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); font-size: 0.84rem; font-weight: 600; }
+button.big, .btn.big { padding: 14px 28px; font-size: 1.02rem; }
 .page-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
 .page-head .sub { color: var(--muted); margin-top: 6px; max-width: 72ch; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px 24px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }

@@ -18,14 +18,21 @@ export async function GET(req: Request) {
   }
 }
 
-/** Starts a run: { geos: ["ae","us"], segments: ["leaders",…], extraTitles?, pages?, maxQueries? }. Spends nothing yet. */
+/** Starts a run: { maxQueries?, pages? }. Covers every type of lead in both countries unless geos or segments are given. Spends nothing yet. */
 export async function POST(req: Request) {
   const denied = checkPassword(req);
   if (denied) return denied;
   const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-  const geos = list(b.geos).filter(isGeo) as Geo[];
   try {
-    const run = await createRun(getDb(), { geos, segments: list(b.segments), extraTitles: list(b.extraTitles) }, { pages: Number(b.pages), maxQueries: Number(b.maxQueries) });
+    const run = await createRun(
+      getDb(),
+      {
+        geos: b.geos === undefined ? undefined : (list(b.geos).filter(isGeo) as Geo[]),
+        segments: b.segments === undefined ? undefined : list(b.segments),
+        extraTitles: list(b.extraTitles),
+      },
+      { pages: Number(b.pages), maxQueries: Number(b.maxQueries) },
+    );
     return NextResponse.json({ run });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });

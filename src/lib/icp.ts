@@ -19,6 +19,9 @@ export type Segment = {
 
 export const SEGMENTS: Segment[] = [
   { id: 'leaders', label: 'Company leaders', description: 'The main decision-maker at any company', titles: ['Founder', 'Co-Founder', 'CEO', 'Managing Director', 'Owner', 'President', 'Chairman'], keywords: [] },
+  { id: 'software', label: 'Software and internet', description: 'Founders and C-suite at software and internet companies', titles: ['Founder', 'CEO', 'COO', 'CMO', 'President'], keywords: ['software'] },
+  { id: 'finance', label: 'Financial services', description: 'CEOs, MDs and C-suite at banks, fintechs and financial firms', titles: ['CEO', 'Managing Director', 'President', 'COO', 'CMO'], keywords: ['financial services'] },
+  { id: 'media', label: 'Media and entertainment', description: 'Founders and C-suite at media and entertainment companies', titles: ['Founder', 'CEO', 'COO', 'CMO', 'Managing Director', 'President'], keywords: ['media'] },
   { id: 'startups', label: 'Startup founders and C-suite', description: 'Founders, CEOs, CTOs, CMOs and COOs at startups', titles: ['Founder', 'Co-Founder', 'CEO', 'CTO', 'CMO', 'COO'], keywords: ['startup'] },
   { id: 'hedge', label: 'Hedge funds and asset managers', description: 'CIOs, founders and managing partners', titles: ['Chief Investment Officer', 'CIO', 'Founder', 'Managing Partner'], keywords: ['hedge fund'], fund: true },
   { id: 'vc', label: 'Venture capital', description: 'Managing, general and founding partners', titles: ['Managing Partner', 'General Partner', 'Founding Partner', 'Founder'], keywords: ['venture capital'], fund: true },

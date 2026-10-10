@@ -3,17 +3,22 @@ import { checkPassword } from '../../../lib/auth';
 import { getDb } from '../../../lib/db';
 import { dailyLimitFromEnv, enrichStatus } from '../../../lib/enrich';
 import { listRuns } from '../../../lib/run';
-import { countPeople } from '../../../lib/store';
+import { countPeople, listPeople } from '../../../lib/store';
 
 export const dynamic = 'force-dynamic';
 
-/** Totals for the overview page. Spends nothing. */
+/** Totals, recent runs and the newest main people, for the overview page. Spends nothing. */
 export async function GET(req: Request) {
   const denied = checkPassword(req);
   if (denied) return denied;
   try {
     const db = getDb();
-    return NextResponse.json({ people: await countPeople(db), enrich: await enrichStatus(db, dailyLimitFromEnv()), runs: await listRuns(db, 5) });
+    return NextResponse.json({
+      people: await countPeople(db),
+      enrich: await enrichStatus(db, dailyLimitFromEnv()),
+      runs: await listRuns(db, 6),
+      latest: await listPeople(db, { topOnly: true, limit: 10 }),
+    });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });
   }
