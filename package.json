@@ -9,7 +9,7 @@
     "build": "next build",
     "start": "next start",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "step:1": "tsx --env-file=.env scripts/step1.ts"
   },
   "dependencies": {

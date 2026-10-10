@@ -7,7 +7,7 @@ const STEPS = [
   { n: 3, title: 'LinkedIn snippet parser', href: '/steps/3', built: true },
   { n: 4, title: 'Title normaliser and seniority tag', href: '/steps/4', built: true },
   { n: 5, title: 'Company domain resolver', href: '/steps/5', built: true },
-  { n: 6, title: 'Dedupe and store', href: '', built: false },
+  { n: 6, title: 'Dedupe and store', href: '/steps/6', built: true },
   { n: 7, title: 'Full run with cost log', href: '', built: false },
   { n: 8, title: 'Review screen and CSV export', href: '', built: false },
 ];
