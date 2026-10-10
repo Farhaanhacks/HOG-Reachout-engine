@@ -23,11 +23,14 @@ company-domain matcher and the site reader. Everything India-specific is made a 
 | 4 | Title normaliser and seniority tag | `npm run step:4` | "Chief Technology Officer" gives `c_suite`; "Co-Founder & CEO" gives `founder` | `src/lib/seniority.ts` |
 | 5 | Company domain resolver | `npm run step:5 -- "Acme Capital" ae` | Official domain found, directories rejected | `src/lib/website.ts` (port) |
 | 6 | Dedupe and store | `npm run step:6` | Same LinkedIn URL twice stores once; re-run adds only new people | `src/lib/store.ts` |
-| 7 | Full run: brief to saved prospects, with a cost log | `npm run run -- brief.json` | Prospects table filled; log shows queries and cost per run | `src/lib/run.ts` |
+| 7 | Full run: brief to saved prospects, with a cost log. People whose location is outside the searched country are dropped; people with no location line are kept and marked for review. | `npm run run -- brief.json` | Prospects table filled; log shows queries and cost per run | `src/lib/run.ts` |
 | 8 | Review screen and CSV export (UI) | `npm run dev` | The team can see, filter and tag prospects | `src/app` |
 
 After the engine: email finder (Apollo or an alternative), then email automation and sending.
 
 ## Status
 - [x] Plan
-- [ ] Step 0 and 1 written (including the site page `/steps/1`), not yet run (Node is not installed on this machine)
+- [x] Step 1 works live for the UAE (10 results with LinkedIn profiles). US search not yet checked.
+- [ ] Steps 4 (`/steps/4`, `src/lib/seniority.ts`) and 5 (`/steps/5`, `src/lib/website.ts`, ported from Inveck) written with tests, not yet run. Next: step 6 (dedupe and store), which needs a database.
+- [ ] Steps 2 and 3 written (`/steps/2`, `/steps/3`, tests in `tests/linkedin.test.ts`), not yet run: Node is not installed on this machine
+- Findings from the real step 1 output that shaped step 3: the city word can match a company name (a Bay Area CEO of "Dubai Technologies"), so each person's location line is checked; titles are cut off with "..." so the line under the result supplies the full company; profile links come on several hosts (`ae.linkedin.com`, `www.linkedin.com`) so URLs are normalised.

@@ -3,10 +3,10 @@ import Link from 'next/link';
 // One row per build step (see PLAN.md). A step's page runs only that step, so a failure points at it.
 const STEPS = [
   { n: 1, title: 'Serper search by country', href: '/steps/1', built: true },
-  { n: 2, title: 'Query builder', href: '', built: false },
-  { n: 3, title: 'LinkedIn snippet parser', href: '', built: false },
-  { n: 4, title: 'Title normaliser and seniority tag', href: '', built: false },
-  { n: 5, title: 'Company domain resolver', href: '', built: false },
+  { n: 2, title: 'Query builder', href: '/steps/2', built: true },
+  { n: 3, title: 'LinkedIn snippet parser', href: '/steps/3', built: true },
+  { n: 4, title: 'Title normaliser and seniority tag', href: '/steps/4', built: true },
+  { n: 5, title: 'Company domain resolver', href: '/steps/5', built: true },
   { n: 6, title: 'Dedupe and store', href: '', built: false },
   { n: 7, title: 'Full run with cost log', href: '', built: false },
   { n: 8, title: 'Review screen and CSV export', href: '', built: false },

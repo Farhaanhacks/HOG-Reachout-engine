@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import { checkPassword } from '../../../../lib/auth';
 import { isGeo } from '../../../../lib/geo';
+import { parsePeople } from '../../../../lib/linkedin';
 import { googleSearch, keysFromEnv } from '../../../../lib/services';
 
+/** Step 3: one search, then each result read into a person. Returns the raw results too, to see what the parser was given. */
 export async function POST(req: Request) {
   const denied = checkPassword(req);
   if (denied) return denied;
@@ -13,7 +15,7 @@ export async function POST(req: Request) {
   }
   try {
     const results = await googleSearch({ fetch, keys: keysFromEnv() }, query.trim(), geo);
-    return NextResponse.json({ results });
+    return NextResponse.json({ results, people: parsePeople(results, geo) });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });
   }
