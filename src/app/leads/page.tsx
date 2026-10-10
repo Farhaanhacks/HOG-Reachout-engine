@@ -5,10 +5,14 @@ import { CountryBadge, EmailBadge, RankBadge } from '../../components/badges';
 import { api, formatDate } from '../../lib/client';
 import type { SavedPerson } from '../../lib/store';
 
+/** Filters a link can set, e.g. /leads?ready=1 from the Overview's "Emails ready". */
+const linkParams = () => new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search);
+
 export default function LeadsPage() {
   const [geo, setGeo] = useState('');
-  const [who, setWho] = useState<'top' | 'targets' | 'all'>('top');
-  const [ready, setReady] = useState(false);
+  // Showing emails means showing everyone who has one, not only the main person of each company.
+  const [who, setWho] = useState<'top' | 'targets' | 'all'>(() => (linkParams().get('ready') === '1' ? 'all' : 'top'));
+  const [ready, setReady] = useState(() => linkParams().get('ready') === '1');
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
   const [people, setPeople] = useState<SavedPerson[] | null>(null);
@@ -25,10 +29,14 @@ export default function LeadsPage() {
   }, [geo, who, ready, query]);
 
   useEffect(() => {
+    let current = true; // ignore answers to filters the user has already changed
     setError('');
     api<{ people: SavedPerson[] }>(`/api/leads?${params}`)
-      .then((d) => setPeople(d.people))
-      .catch((e: Error) => setError(e.message));
+      .then((d) => current && setPeople(d.people))
+      .catch((e: Error) => current && setError(e.message));
+    return () => {
+      current = false;
+    };
   }, [params]);
 
   // Search as the user types, a moment after they stop.

@@ -37,7 +37,7 @@ export async function enrichStatus(db: Db, dailyLimit = DEFAULT_DAILY_LIMIT): Pr
   const [p] = await db.query<{ pending: number; checked: number; with_email: number }>(
     `SELECT count(*) FILTER (WHERE is_target AND geo_match <> 'other' AND apollo_status = 'none')::int AS pending,
             count(*) FILTER (WHERE apollo_status <> 'none')::int AS checked,
-            count(*) FILTER (WHERE apollo_status = 'matched')::int AS with_email
+            count(*) FILTER (WHERE apollo_status IN ('matched', 'low_confidence'))::int AS with_email
      FROM people`,
   );
   const [t] = await db.query<{ used: number; credits: number }>(
@@ -130,7 +130,8 @@ export async function runEnrichment(svc: Services, db: Db, opts: { limit: number
     if (!r) continue;
     sent++;
     if (r.m) matched++;
-    if (statusOf(r.m) === 'matched') withEmail++;
+    // Low-confidence emails are still sent to: the team decided to reach them too.
+    if (r.m?.email) withEmail++;
     await save(db, p, r.m, r.tier);
   }
   if (sent) await db.query('INSERT INTO enrichment_log (requested, matched, with_email, credits) VALUES ($1, $2, $3, $4)', [sent, matched, withEmail, credits]);

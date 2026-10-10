@@ -94,6 +94,9 @@ button.big, .btn.big { padding: 14px 28px; font-size: 1.02rem; }
 .stat .n { font-size: 1.7rem; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .stat .l { color: var(--muted); font-size: 0.82rem; }
 .card .stats .stat { background: var(--surface-2); border-color: transparent; }
+a.stat-link { color: var(--fg); display: block; }
+a.stat-link:hover { border-color: var(--accent); text-decoration: none; }
+a.stat-link .l { color: #a9c7f6; }
 
 /* Forms */
 .form { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }

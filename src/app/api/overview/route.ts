@@ -18,6 +18,7 @@ export async function GET(req: Request) {
       enrich: await enrichStatus(db, dailyLimitFromEnv()),
       runs: await listRuns(db, 6),
       latest: await listPeople(db, { topOnly: true, limit: 10 }),
+      emails: await listPeople(db, { ready: true, orderBy: 'emails', limit: 10 }),
     });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });

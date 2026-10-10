@@ -40,6 +40,8 @@ function cleanCompany(raw: string): { company: string; truncated: boolean } {
   let text = raw.trim();
   const truncated = /(\.\.\.|…)\s*$/.test(text);
   text = text.replace(/\s*(\.\.\.|…)\s*$/, '').replace(/\s*\([^)]*\)\s*$/, ''); // "TENDERD (YC S18)" is "TENDERD"
+  // "Dubai Holding and the Chief Executive Officer of …" is the company "Dubai Holding" followed by a second role.
+  text = text.replace(/\s+(?:and|&)\s+(?:the\s+)?(?:chief|ceo|cfo|coo|cto|founder|co-?founder|managing|president|chairman|director|head|partner)\b.*$/i, '');
   // "Sooner, YC Alum" is the company "Sooner"; "Acme, Inc." keeps its suffix.
   const comma = /^([^,]+),\s*(.*)$/.exec(text);
   if (comma && !COMPANY_SUFFIX.test(comma[2])) text = comma[1];

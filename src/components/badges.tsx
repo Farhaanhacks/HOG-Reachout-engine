@@ -13,7 +13,7 @@ export function RunBadge({ status, error }: { status: string; error?: string }) 
 const EMAIL: Record<string, [string, string]> = {
   none: ['', 'Not looked up'],
   matched: ['ok', 'Email ready'],
-  low_confidence: ['warn', 'Check match'],
+  low_confidence: ['warn', 'Email ready · low match'],
   no_email: ['', 'No email'],
   no_match: ['', 'Not in Apollo'],
 };

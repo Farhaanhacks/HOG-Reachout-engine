@@ -165,6 +165,8 @@ export type ListOptions = {
   ready?: boolean;
   /** Only the main person of each company (rank 1). */
   topOnly?: boolean;
+  /** 'newest' (default): most recently found first. 'emails': most recently given an email first. */
+  orderBy?: 'newest' | 'emails';
   /** Text to find in name, title or company. */
   q?: string;
   limit?: number;
@@ -179,7 +181,7 @@ export async function listPeople(db: Db, opts: ListOptions = {}): Promise<SavedP
     where.push(`geo = $${params.length}`);
   }
   if (opts.targetOnly) where.push('is_target = TRUE');
-  if (opts.ready) where.push(`apollo_status = 'matched'`);
+  if (opts.ready) where.push(`apollo_status IN ('matched', 'low_confidence')`);
   if (opts.topOnly) where.push('rank = 1');
   if (opts.q?.trim()) {
     params.push(`%${opts.q.trim()}%`);
@@ -190,7 +192,8 @@ export async function listPeople(db: Db, opts: ListOptions = {}): Promise<SavedP
   return db.query<SavedPerson>(
     `SELECT id, linkedin_url, name, title, company, location, geo, geo_match, labels, is_target, inferred, status, seen_count, first_seen, last_seen,
             email, email_status, apollo_status, apollo_confidence, apollo_tier, rank
-     FROM people ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY first_seen DESC, id DESC LIMIT $${params.length}`,
+     FROM people ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+     ORDER BY ${opts.orderBy === 'emails' ? 'apollo_checked_at DESC NULLS LAST,' : ''} first_seen DESC, id DESC LIMIT $${params.length}`,
     params,
   );
 }

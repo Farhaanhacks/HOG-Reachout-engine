@@ -166,13 +166,13 @@ describe('runEnrichment', () => {
     expect(calls).toHaveLength(1);
   });
 
-  it('keeps a low-confidence email but does not count it as ready', async () => {
+  it('labels a low-confidence email but still counts it as ready', async () => {
     await savePeople(db, [person('a')], 'ae', 'q');
     const { svc } = fakeApollo((details) => ({ matches: details.map((d) => found(d, { match_confidence: 'low' })), credits_consumed: 1 }));
     const summary = await runEnrichment(svc, db, { limit: 10 });
-    expect(summary.withEmail).toBe(0);
+    expect(summary.withEmail).toBe(1);
     expect((await rows())[0]).toMatchObject({ apollo_status: 'low_confidence', email: 'someone@acme.com' });
-    expect((await enrichStatus(db)).withEmail).toBe(0);
+    expect((await enrichStatus(db)).withEmail).toBe(1);
   });
 
   it('stops at the daily limit', async () => {

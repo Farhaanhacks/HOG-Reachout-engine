@@ -108,7 +108,7 @@ export default function EmailsPage() {
 
       <section className="card">
         <h2>Looked up</h2>
-        <p className="muted small">"Check match" means Apollo found an email but is not sure it is the right person: look before using it.</p>
+        <p className="muted small">"Low match" means Apollo found an email but is less sure it belongs to this person. These are still counted as ready and will be emailed.</p>
         <div className="table-wrap">
           <table>
             <thead><tr><th>Name</th><th>Company</th><th>Email</th><th>Result</th><th>Apollo confidence</th></tr></thead>

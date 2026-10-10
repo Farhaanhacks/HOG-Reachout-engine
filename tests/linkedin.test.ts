@@ -133,6 +133,11 @@ describe('results seen on the live site', () => {
     expect(parsePerson(r('A Person - Entrepreneur', 'https://www.linkedin.com/in/ap'), 'ae')).toMatchObject({ company: '' });
   });
 
+  it('stops the company name where a second role starts (Khalid Al Malik)', () => {
+    expect(splitRoleAndCompany('Managing Director at Dubai Holding and the Chief Executive Officer')).toMatchObject({ title: 'Managing Director', company: 'Dubai Holding' });
+    expect(splitRoleAndCompany('CEO at Johnson & Johnson')).toMatchObject({ company: 'Johnson & Johnson' });
+  });
+
   it('drops a bracketed programme from a company name (TENDERD)', () => {
     expect(splitRoleAndCompany('Founder & CEO at TENDERD (YC S18)')).toMatchObject({ title: 'Founder & CEO', company: 'TENDERD' });
   });

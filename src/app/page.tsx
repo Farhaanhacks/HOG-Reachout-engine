@@ -13,6 +13,7 @@ type Overview = {
   enrich: EnrichStatus;
   runs: Run[];
   latest: SavedPerson[];
+  emails: SavedPerson[];
 };
 
 const sum = (rows: Overview['people'], key: 'total' | 'targets' | 'main') => rows.reduce((n, p) => n + p[key], 0);
@@ -45,9 +46,33 @@ export default function OverviewPage() {
         <div className="stat"><div className="n">{n(data && sum(data.people, 'main'))}</div><div className="l">Main decision-makers</div></div>
         <div className="stat"><div className="n">{n(byGeo('ae')?.total ?? 0)}</div><div className="l">In the UAE</div></div>
         <div className="stat"><div className="n">{n(byGeo('us')?.total ?? 0)}</div><div className="l">In the US</div></div>
-        <div className="stat"><div className="n">{n(data?.enrich.withEmail)}</div><div className="l">Emails ready</div></div>
+        <Link href="/leads?ready=1" className="stat stat-link"><div className="n">{n(data?.enrich.withEmail)}</div><div className="l">Emails ready →</div></Link>
         <div className="stat"><div className="n">{n(data ? `${data.enrich.usedToday}/${data.enrich.dailyLimit}` : '')}</div><div className="l">Apollo lookups today</div></div>
       </div>
+
+      <section className="card">
+        <div className="card-head">
+          <h2>Emails ready</h2>
+          <Link href="/leads?ready=1" className="small">See all {data ? data.enrich.withEmail : ''} emails</Link>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Name</th><th>Title</th><th>Company</th><th>Email</th><th>Country</th></tr></thead>
+            <tbody>
+              {data?.emails.map((p) => (
+                <tr key={String(p.id)}>
+                  <td><a href={p.linkedin_url} target="_blank" rel="noreferrer">{p.name}</a></td>
+                  <td>{p.title || <span className="faint">—</span>}</td>
+                  <td>{p.company || <span className="faint">—</span>}</td>
+                  <td><div>{p.email}</div><EmailBadge status={p.apollo_status} /></td>
+                  <td><CountryBadge geo={p.geo} match={p.geo_match} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {data && !data.emails.length && <p className="empty">No emails yet. Tick "Then get emails from Apollo" on Find leads, or use the Emails page.</p>}
+        </div>
+      </section>
 
       <section className="card">
         <div className="card-head">

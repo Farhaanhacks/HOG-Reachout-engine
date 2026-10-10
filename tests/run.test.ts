@@ -1,7 +1,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { toCsv } from '../src/lib/csv';
-import { planQueries } from '../src/lib/icp';
+import { SEGMENTS, planQueries } from '../src/lib/icp';
 import { createRun, finishRun, getRun, listRuns, runStep } from '../src/lib/run';
 import type { SerperResult, Services } from '../src/lib/services';
 import { ensureSchema, listPeople, type Db } from '../src/lib/store';
@@ -44,6 +44,12 @@ describe('planQueries', () => {
     const q = planQueries({ geos: ['ae', 'us'], segments: ['leaders', 'hedge'] }, 4);
     expect(new Set(q.map((x) => x.geo))).toEqual(new Set(['ae', 'us']));
     expect(new Set(q.map((x) => x.segment))).toEqual(new Set(['leaders', 'hedge']));
+  });
+
+  it('reaches both countries even in a short run of every type', () => {
+    const q = planQueries({ geos: ['ae', 'us'], segments: SEGMENTS.map((s) => s.id) }, 10);
+    expect(q.filter((x) => x.geo === 'ae')).toHaveLength(5);
+    expect(q.filter((x) => x.geo === 'us')).toHaveLength(5);
   });
 
   it('ignores unknown types and never repeats a search', () => {

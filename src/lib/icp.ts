@@ -46,11 +46,13 @@ export type Plan = { geos: Geo[]; segments: string[]; extraTitles?: string[] };
  */
 export function planQueries(plan: Plan, maxQueries?: number): PlannedQuery[] {
   const groups: PlannedQuery[][] = [];
-  for (const geo of plan.geos) {
-    for (const id of plan.segments) {
-      const s = segmentById(id);
-      if (!s) continue;
-      const titles = [...s.titles, ...(plan.extraTitles ?? [])];
+  // Countries alternate inside each segment (UAE leaders, US leaders, UAE software, US software…), so even a short
+  // run reaches every country.
+  for (const id of plan.segments) {
+    const s = segmentById(id);
+    if (!s) continue;
+    const titles = [...s.titles, ...(plan.extraTitles ?? [])];
+    for (const geo of plan.geos) {
       groups.push(buildQueries({ geo, titles, keywords: s.keywords }).map((query) => ({ query, geo, segment: s.id })));
     }
   }
