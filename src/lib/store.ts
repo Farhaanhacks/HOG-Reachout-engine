@@ -30,6 +30,22 @@ export async function ensureSchema(db: Db): Promise<void> {
     last_seen TIMESTAMPTZ NOT NULL DEFAULT now()
   )`);
   await db.query('CREATE INDEX IF NOT EXISTS people_geo_target ON people (geo, is_target)');
+  // Apollo results (step 9). Added with ALTER so a database made before step 9 upgrades itself.
+  await db.query(`ALTER TABLE people
+    ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS email_status TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS apollo_status TEXT NOT NULL DEFAULT 'none',
+    ADD COLUMN IF NOT EXISTS apollo_confidence TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS apollo_tier INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS apollo_checked_at TIMESTAMPTZ`);
+  await db.query(`CREATE TABLE IF NOT EXISTS enrichment_log (
+    id BIGSERIAL PRIMARY KEY,
+    ran_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    requested INTEGER NOT NULL,
+    matched INTEGER NOT NULL,
+    with_email INTEGER NOT NULL,
+    credits NUMERIC NOT NULL DEFAULT 0
+  )`);
   ready.add(db);
 }
 
@@ -92,6 +108,11 @@ export type SavedPerson = {
   seen_count: number;
   first_seen: string;
   last_seen: string;
+  email: string;
+  email_status: string;
+  apollo_status: string;
+  apollo_confidence: string;
+  apollo_tier: number;
 };
 
 export async function listPeople(db: Db, opts: { geo?: Geo; targetOnly?: boolean; limit?: number } = {}): Promise<SavedPerson[]> {
@@ -105,7 +126,8 @@ export async function listPeople(db: Db, opts: { geo?: Geo; targetOnly?: boolean
   if (opts.targetOnly) where.push('is_target = TRUE');
   params.push(Math.min(Math.max(opts.limit ?? 200, 1), 1000));
   return db.query<SavedPerson>(
-    `SELECT id, linkedin_url, name, title, company, location, geo, geo_match, labels, is_target, inferred, status, seen_count, first_seen, last_seen
+    `SELECT id, linkedin_url, name, title, company, location, geo, geo_match, labels, is_target, inferred, status, seen_count, first_seen, last_seen,
+            email, email_status, apollo_status, apollo_confidence, apollo_tier
      FROM people ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY first_seen DESC, id DESC LIMIT $${params.length}`,
     params,
   );

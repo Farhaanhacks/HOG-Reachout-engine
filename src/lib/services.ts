@@ -1,7 +1,7 @@
 import type { Geo } from './geo';
 import { GEOS } from './geo';
 
-export type ApiKeys = { serper: string; jina: string; deepseek: string };
+export type ApiKeys = { serper: string; jina: string; deepseek: string; apollo?: string };
 
 /** Lookups kept between runs (places, domains), so each is made once. */
 export type EnrichmentCache = {
@@ -17,7 +17,7 @@ export type Services = {
 };
 
 export function keysFromEnv(env: NodeJS.ProcessEnv = process.env): ApiKeys {
-  return { serper: env.SERPER_API_KEY ?? '', jina: env.JINA_API_KEY ?? '', deepseek: env.DEEPSEEK_API_KEY ?? '' };
+  return { serper: env.SERPER_API_KEY ?? '', jina: env.JINA_API_KEY ?? '', deepseek: env.DEEPSEEK_API_KEY ?? '', apollo: env.APOLLO_API_KEY ?? '' };
 }
 
 export class HttpError extends Error {

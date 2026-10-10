@@ -10,6 +10,7 @@ const STEPS = [
   { n: 6, title: 'Dedupe and store', href: '/steps/6', built: true },
   { n: 7, title: 'Full run with cost log', href: '', built: false },
   { n: 8, title: 'Review screen and CSV export', href: '', built: false },
+  { n: 9, title: 'Apollo emails', href: '/steps/9', built: true },
 ];
 
 export default function Home() {

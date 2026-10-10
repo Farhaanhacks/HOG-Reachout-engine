@@ -32,6 +32,7 @@ After the engine: email finder (Apollo or an alternative), then email automation
 - [x] Plan
 - [x] Step 1 works live for the UAE (10 results with LinkedIn profiles). US search not yet checked.
 - [ ] Step 6 written (`/steps/6`, `src/lib/store.ts`, `src/lib/db.ts`; Postgres via `DATABASE_URL`; tests run against an embedded Postgres in `tests/store.test.ts`), not yet run. `/api/health` now also reports whether the database answers.
+- [ ] Step 9 written (`/steps/9`, `src/lib/apollo.ts`, `src/lib/enrich.ts`, `tests/apollo.test.ts`), not yet run. Uses Apollo's bulk people match (`POST /api/v1/people/bulk_match`, `x-api-key` header, 10 people per request). Tier 1 sends LinkedIn URL + name; tier 2 sends name + company for those without an email. Only founders, C-suite, owners and partners not based outside the country are sent; each person once; a daily cap (`APOLLO_DAILY_LIMIT`, default 100) applies. No phone reveal or waterfall options are sent, so no extra credits are spent on them. Needs `APOLLO_API_KEY` in Vercel.
 - Scope change: the goal is LinkedIn profile URLs; Apollo turns them into emails later (step 9). Name, title and company are best-effort only.
 - [ ] Steps 4 (`/steps/4`, `src/lib/seniority.ts`) and 5 (`/steps/5`, `src/lib/website.ts`, ported from Inveck) written with tests, not yet run. Next: step 6 (dedupe and store), which needs a database.
 - [ ] Steps 2 and 3 written (`/steps/2`, `/steps/3`, tests in `tests/linkedin.test.ts`), not yet run: Node is not installed on this machine

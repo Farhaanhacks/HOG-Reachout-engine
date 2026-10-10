@@ -23,6 +23,7 @@ export async function GET() {
     SERPER_API_KEY: set('SERPER_API_KEY'),
     JINA_API_KEY: set('JINA_API_KEY'),
     DEEPSEEK_API_KEY: set('DEEPSEEK_API_KEY'),
+    APOLLO_API_KEY: set('APOLLO_API_KEY'),
     database,
   });
 }
