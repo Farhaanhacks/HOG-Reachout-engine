@@ -49,17 +49,16 @@ const person = (slug: string, title = 'Founder & CEO'): Person => ({
   inferred: false,
 });
 
-/** Saves people and gives some of them an Apollo email. */
-async function seed(withEmail: Record<string, { status?: string; size?: string }>, others: string[] = []) {
+/** Saves people and gives some of them an Apollo email and (unless `opener` is null) a personal opener. */
+async function seed(withEmail: Record<string, { status?: string; size?: string; opener?: string | null }>, others: string[] = []) {
   const all = [...Object.keys(withEmail), ...others];
   await savePeople(db, all.map((s) => person(s, s.startsWith('cto') ? 'CTO' : 'Founder & CEO')), 'ae', 'q');
   for (const [slug, o] of Object.entries(withEmail)) {
-    await db.query("UPDATE people SET email = $2, apollo_status = $3, company_size = $4, apollo_checked_at = now() WHERE linkedin_url = $1", [
-      `https://www.linkedin.com/in/${slug}`,
-      `${slug}@${slug}co.com`,
-      o.status ?? 'matched',
-      o.size ?? 'fit',
-    ]);
+    const opener = o.opener === null ? '' : (o.opener ?? `Your launch at ${slug}co this year caught our eye.`);
+    await db.query(
+      'UPDATE people SET email = $2, apollo_status = $3, company_size = $4, apollo_checked_at = now(), opener = $5, opener_status = $6 WHERE linkedin_url = $1',
+      [`https://www.linkedin.com/in/${slug}`, `${slug}@${slug}co.com`, o.status ?? 'matched', o.size ?? 'fit', opener, o.opener === null ? '' : 'done'],
+    );
   }
 }
 const statusOf = async (slug: string) =>
@@ -86,6 +85,15 @@ describe('listCampaigns', () => {
 });
 
 describe('pushToInstantly', () => {
+  it('sends only personalized people', async () => {
+    await seed({ a: {}, raw: { opener: null } });
+    const { svc, calls } = fakeInstantly((leads) => ({ created_leads: leads.map((l, index) => ({ index, id: `L${index}`, email: l.email })) }));
+    await pushToInstantly(svc, db, { campaignId: 'camp-1', limit: 10 });
+    expect(calls[0].body!.leads!.map((l) => l.email)).toEqual(['a@aco.com']);
+    expect(calls[0].body!.leads![0].custom_variables?.body).toContain('Your launch at aco this year caught our eye.');
+    expect(await outreachStatus(db)).toMatchObject({ waiting: 0, toPersonalize: 1, sent: 1 });
+  });
+
   it('sends people with an email ready, main people first, and marks what Instantly did', async () => {
     await seed({ cto1: {}, a: {}, b: { status: 'low_confidence' }, small: { size: 'too_small' } }, ['noemail']);
     const { svc, calls } = fakeInstantly((leads) => ({

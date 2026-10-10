@@ -9,7 +9,7 @@ export const PITCH = {
   socialProof: ['Okba Chabbi', 'Massey Whiteknife', 'Anja Vandenbergh'],
 };
 
-export type DraftInput = { name: string; title: string; company: string };
+export type DraftInput = { name: string; title: string; company: string; /** The personal first line, when one was written. */ opener?: string };
 export type Draft = { firstName: string; subject: string; body: string };
 
 const HONORIFIC = /^(dr|mr|mrs|ms|miss|eng|engr|prof|sir|he|h\.e|sheikh|shaikh)\.?$/i;
@@ -30,16 +30,20 @@ function roleLine(title: string, company: string): string {
 }
 
 /**
- * The first email for a lead. Written from the lead's saved name, title and company only, in code (no AI), so every
- * draft is predictable and no personal data leaves the app. The sending tool adds the sender's signature.
+ * The first email for a lead. The personal opener (written from research, see personalize.ts) comes first when there is
+ * one; everything else is the fixed pitch, assembled in code, so the AI can never change what Humans of Globe offers.
+ * The sending tool adds the sender's signature.
  */
 export function draftEmail(p: DraftInput): Draft {
   const firstName = firstNameOf(p.name);
   const subject = p.company ? `Featuring ${p.company}'s leadership story` : 'An invitation to share your leadership story';
+  const opener = p.opener?.trim();
   const body = [
     `Hi ${firstName},`,
     '',
-    `I'm reaching out from Humans of Globe. We're putting together our next global feature on leaders who are building something worth talking about, and your work${roleLine(p.title, p.company)} stood out.`,
+    opener
+      ? `${opener}\n\nThat's why I'm reaching out from Humans of Globe. We're putting together our next global feature on leaders who are building something worth talking about, and we'd love to include your story.`
+      : `I'm reaching out from Humans of Globe. We're putting together our next global feature on leaders who are building something worth talking about, and your work${roleLine(p.title, p.company)} stood out.`,
     '',
     'Humans of Globe publishes in-depth leadership stories in print and online, read by decision-makers and professionals around the world. Each feature is an interview told in your own voice and held to a high editorial standard, not a press release.',
     '',

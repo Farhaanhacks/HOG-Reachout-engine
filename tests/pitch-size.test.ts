@@ -12,6 +12,13 @@ describe('draftEmail', () => {
     expect(d.body).toContain('Okba Chabbi, Massey Whiteknife and Anja Vandenbergh');
   });
 
+  it('puts the personal opener first and keeps the fixed pitch after it', () => {
+    const d = draftEmail({ name: 'Ziad El Chaar', title: 'CEO', company: 'DarGlobal', opener: 'Your London launch with DarGlobal this year caught our eye.' });
+    expect(d.body.startsWith('Hi Ziad,\n\nYour London launch with DarGlobal this year caught our eye.\n\nThat\'s why I\'m reaching out from Humans of Globe.')).toBe(true);
+    expect(d.body).not.toContain('stood out');
+    expect(d.body).toContain('Would you be open to sharing yours');
+  });
+
   it('still reads well with no title or company', () => {
     const d = draftEmail({ name: 'Mena Botros', title: '', company: '' });
     expect(d.subject).toBe('An invitation to share your leadership story');

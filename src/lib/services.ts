@@ -70,6 +70,19 @@ export async function googleSearch(svc: Services, q: string, geo: Geo, page = 1)
   return Array.isArray(data.organic) ? data.organic : [];
 }
 
+export type NewsResult = { title?: string; link?: string; snippet?: string; date?: string; source?: string };
+
+/** Google News through Serper for one country, from the past year. */
+export async function newsSearch(svc: Services, q: string, geo: Geo): Promise<NewsResult[]> {
+  if (!svc.keys.serper) throw new Error('SERPER_API_KEY is not set');
+  const data = await getJson<{ news?: NewsResult[] }>(svc, 'https://google.serper.dev/news', {
+    method: 'POST',
+    headers: { 'X-API-KEY': svc.keys.serper, 'content-type': 'application/json' },
+    body: JSON.stringify({ q, gl: GEOS[geo].gl, num: 5, tbs: 'qdr:y' }),
+  });
+  return Array.isArray(data.news) ? data.news : [];
+}
+
 /** Runs `fn` over `items` with at most `limit` running at once, keeping order. */
 export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, i: number) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);

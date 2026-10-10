@@ -44,7 +44,11 @@ export async function ensureSchema(db: Db): Promise<void> {
     ADD COLUMN IF NOT EXISTS instantly_status TEXT NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS instantly_lead_id TEXT NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS instantly_campaign_id TEXT NOT NULL DEFAULT '',
-    ADD COLUMN IF NOT EXISTS instantly_at TIMESTAMPTZ`);
+    ADD COLUMN IF NOT EXISTS instantly_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS opener TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS opener_fact TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS opener_status TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS personalized_at TIMESTAMPTZ`);
   await db.query(`CREATE TABLE IF NOT EXISTS outreach_log (
     id BIGSERIAL PRIMARY KEY,
     ran_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -177,6 +181,11 @@ export type SavedPerson = {
   /** '' = not sent; 'added' = in an Instantly campaign; 'skipped' = Instantly declined (already there, invalid, blocklisted). */
   instantly_status?: string;
   instantly_at?: string | null;
+  /** The personal first line of their email, written from research (see personalize.ts). */
+  opener?: string;
+  opener_fact?: string;
+  /** '' = not personalized yet; 'done' = has an opener; 'none' = nothing specific found, held back from sending. */
+  opener_status?: string;
 };
 
 /**
@@ -218,7 +227,8 @@ export async function listPeople(db: Db, opts: ListOptions = {}): Promise<SavedP
   params.push(Math.min(Math.max(opts.limit ?? 200, 1), 1000));
   return db.query<SavedPerson>(
     `SELECT id, linkedin_url, name, title, company, location, geo, geo_match, labels, is_target, inferred, status, seen_count, first_seen, last_seen,
-            email, email_status, apollo_status, apollo_confidence, apollo_tier, rank, company_employees, company_size, instantly_status, instantly_at
+            email, email_status, apollo_status, apollo_confidence, apollo_tier, rank, company_employees, company_size, instantly_status, instantly_at,
+            opener, opener_fact, opener_status
      FROM people ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
      ORDER BY ${opts.orderBy === 'emails' ? 'apollo_checked_at DESC NULLS LAST,' : ''} first_seen DESC, id DESC LIMIT $${params.length}`,
     params,
