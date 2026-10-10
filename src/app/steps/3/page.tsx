@@ -53,6 +53,7 @@ export default function Step3() {
       {people && (
         <>
           <p>{rawCount} results, {people.length} profiles, {excluded} based outside the searched country{showOther ? '' : ' (hidden)'}. Of the {shown.length} shown, {complete} have name, title and company ({shown.length ? Math.round((complete / shown.length) * 100) : 0}%).</p>
+          <p><small>* guessed from the result's description text, not its title: check before relying on it.</small></p>
           <label><input type="checkbox" checked={showOther} onChange={(e) => setShowOther(e.target.checked)} /> Show people based elsewhere</label>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 14 }}>
@@ -65,7 +66,7 @@ export default function Step3() {
                     <td style={cell}>{p.name}</td>
                     <td style={cell}>{p.title || '—'}</td>
                     <td style={cell}>{tagTitle(p.title, p.company).labels.join(', ') || '—'}</td>
-                    <td style={cell}>{p.company || '—'}{p.companyTruncated ? ' (cut off)' : ''}</td>
+                    <td style={cell}>{p.company || '—'}{p.companyTruncated ? ' (cut off)' : ''}{p.inferred && p.company ? ' *' : ''}</td>
                     <td style={cell}>{p.location || '—'}</td>
                     <td style={cell}>{badge(p.geoMatch)}</td>
                     <td style={cell}><a href={p.linkedin}>open</a></td>

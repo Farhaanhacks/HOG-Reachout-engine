@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalProfileUrl, geoMatch, parsePeople, parsePerson, parseSubtitle, splitRoleAndCompany } from '../src/lib/linkedin';
+import { canonicalProfileUrl, geoMatch, locationFromSnippet, parsePeople, parsePerson, parseSubtitle, placeOnly, roleFromSnippet, splitRoleAndCompany } from '../src/lib/linkedin';
 import { buildQueries } from '../src/lib/queries';
 
 // Real results from the step 1 search "site:linkedin.com/in founder Dubai" (UAE).
@@ -93,6 +93,70 @@ describe('parsePerson', () => {
   });
   it('skips results that are not profiles', () => {
     expect(parsePerson(r('DAMAC | LinkedIn', 'https://www.linkedin.com/company/damac'), 'ae')).toBeNull();
+  });
+});
+
+describe('results seen on the live site', () => {
+  it('reads a name with a credential in brackets and a place as the second part (Jason English)', () => {
+    const p = parsePerson(
+      r(
+        'Jason English (CEO,YPO) - Dubai',
+        'https://ae.linkedin.com/in/jasonenglish',
+        '',
+        'Jason English is an Entrepreneur, Author, Speaker and the Chief Eco-System Officer and co-founder of CG Tech, a company that provides strategic management ...',
+      ),
+      'ae',
+    );
+    expect(p).toMatchObject({ name: 'Jason English', title: 'CEO', company: 'CG Tech', location: 'Dubai', geoMatch: 'match', inferred: true });
+  });
+
+  it('finds the role among the pieces of a long headline (George Thomas)', () => {
+    const p = parsePerson(
+      r(
+        'George Thomas - Building Enduring Partnerships for Business Agility Through Technology | Founder & CEO | SAP & Cloud / IT Infrastructure Expertise | 30+ years in the Middle East',
+        'https://ae.linkedin.com/in/georgethomas',
+        '',
+        'Location: Dubai, United Arab Emirates. Experience: Pinnacle Smart Technologies.',
+      ),
+      'ae',
+    );
+    expect(p).toMatchObject({ name: 'George Thomas', title: 'Founder & CEO', location: 'Dubai, United Arab Emirates', geoMatch: 'match' });
+  });
+
+  it('takes a lone piece after the name as the company', () => {
+    const p = parsePerson(r('George Thomas - Pinnacle Smart Technologies', 'https://ae.linkedin.com/in/georgethomas'), 'ae');
+    expect(p).toMatchObject({ company: 'Pinnacle Smart Technologies', title: '' });
+  });
+
+  it('does not take "MBA" or a job description for a company', () => {
+    expect(parsePerson(r('A Person - Founder | MBA', 'https://www.linkedin.com/in/ap'), 'ae')).toMatchObject({ title: 'Founder', company: '' });
+    expect(parsePerson(r('A Person - Entrepreneur', 'https://www.linkedin.com/in/ap'), 'ae')).toMatchObject({ company: '' });
+  });
+
+  it('drops a bracketed programme from a company name (TENDERD)', () => {
+    expect(splitRoleAndCompany('Founder & CEO at TENDERD (YC S18)')).toMatchObject({ title: 'Founder & CEO', company: 'TENDERD' });
+  });
+});
+
+describe('placeOnly', () => {
+  it('accepts places and rejects company names that contain one', () => {
+    expect(placeOnly('Dubai')).toBe(true);
+    expect(placeOnly('Dubai, United Arab Emirates')).toBe(true);
+    expect(placeOnly('San Francisco Bay Area')).toBe(true);
+    expect(placeOnly('Dubai Technologies')).toBe(false);
+    expect(placeOnly('Dubai Future Foundation')).toBe(false);
+  });
+});
+
+describe('locationFromSnippet and roleFromSnippet', () => {
+  it('reads a labelled or country-qualified location', () => {
+    expect(locationFromSnippet('Location: Dubai, United Arab Emirates · 500+ connections')).toBe('Dubai, United Arab Emirates');
+    expect(locationFromSnippet('Based in Austin, United States and working remotely')).toBe('Austin, United States');
+    expect(locationFromSnippet('No place mentioned')).toBe('');
+  });
+  it('reads a role and company stated in prose, and ignores lowercase words', () => {
+    expect(roleFromSnippet('He is the founder and CEO of Zeta Capital, a fund').company).toBe('Zeta Capital');
+    expect(roleFromSnippet('she is a founder of great things').company).toBe('');
   });
 });
 

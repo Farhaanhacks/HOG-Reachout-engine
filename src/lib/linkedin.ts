@@ -15,6 +15,8 @@ export type Person = {
   geoMatch: 'match' | 'other' | 'unknown';
   linkedin: string;
   snippet: string;
+  /** The role or company was guessed from the result's description text, not read from its title: check it. */
+  inferred: boolean;
 };
 
 /** "https://ae.linkedin.com/in/Name-1?x=y" gives "https://www.linkedin.com/in/name-1", the same for every host. */
@@ -37,7 +39,7 @@ const OWNER_ROLE = /\b(ceo|cfo|coo|cto|founder|co-?founder|chairman|chairwoman|c
 function cleanCompany(raw: string): { company: string; truncated: boolean } {
   let text = raw.trim();
   const truncated = /(\.\.\.|…)\s*$/.test(text);
-  text = text.replace(/\s*(\.\.\.|…)\s*$/, '');
+  text = text.replace(/\s*(\.\.\.|…)\s*$/, '').replace(/\s*\([^)]*\)\s*$/, ''); // "TENDERD (YC S18)" is "TENDERD"
   // "Sooner, YC Alum" is the company "Sooner"; "Acme, Inc." keeps its suffix.
   const comma = /^([^,]+),\s*(.*)$/.exec(text);
   if (comma && !COMPANY_SUFFIX.test(comma[2])) text = comma[1];
@@ -84,28 +86,113 @@ export function geoMatch(location: string, geo: Geo): Person['geoMatch'] {
   return elsewhere.some((re) => re.test(location)) ? 'other' : 'unknown';
 }
 
+/** "Jason English (CEO,YPO)" is the name "Jason English" with the hint "CEO,YPO". Degrees after a comma are dropped. */
+export function splitName(raw: string): { name: string; hint: string } {
+  const m = /^(.*?)\s*\(([^)]*)\)\s*$/.exec(raw.trim());
+  const base = (m ? m[1] : raw).replace(/,\s*(mba|phd|cfa|cpa|fca|dba|msc|mphil)\b.*$/i, '').trim();
+  return { name: base, hint: m ? m[2] : '' };
+}
+
+/** The job words in a name hint: "CEO,YPO" gives "CEO". */
+function roleFromHint(hint: string): string {
+  return hint.split(/[,/&]/).map((p) => p.trim()).filter((p) => p && p.length <= 40 && JOB_WORD.test(p)).slice(0, 2).join(' & ');
+}
+
+const PLACE_ONLY = /^(greater\s+)?(dubai|abu dhabi|sharjah|ajman|ras al[- ]khaimah|fujairah|umm al[- ]quwain|united arab emirates|uae|new york( city)?|san francisco|los angeles|miami|chicago|boston|austin|houston|dallas|seattle|atlanta|denver|san diego|united states|usa)(\s+bay)?(\s+metropolitan)?(\s+area)?$/i;
+
+/** Is the whole text just a place ("Dubai", "Dubai, United Arab Emirates")? "Dubai Technologies" is not. */
+export function placeOnly(text: string): boolean {
+  const base = text.trim().replace(/\s*,\s*(united arab emirates|uae|united states|usa|[a-z ]{2,20})$/i, '');
+  return PLACE_ONLY.test(base);
+}
+
+/** Words that describe a person, so a piece made of them is not a company name. */
+const NOT_A_COMPANY = /^(entrepreneur|investor|author|speaker|advisor|adviser|consultant|student|professional|leader|expert|coach|mentor|engineer|architect|lawyer|doctor|specialist|freelancer|executive|manager|director)s?\b/i;
+
+/** A piece of a title that looks like a company name: short, capitalised, not a role, a place or a sentence. */
+function looksLikeCompany(piece: string): boolean {
+  const p = piece.trim();
+  if (!p || p.length > 60 || !/^[A-Z0-9]/.test(p)) return false;
+  if (p.split(/\s+/).length > 6 || JOB_WORD.test(p) || placeOnly(p) || NOT_A_COMPANY.test(p)) return false;
+  return !/\d+\+?\s*years/i.test(p);
+}
+
+const ROLE_PHRASE = String.raw`(?:co-?founder|founder|ceo|chief [a-z-]+(?: [a-z-]+)? officer|managing (?:partner|director)|chairman|president|owner)`;
+const SNIPPET_ROLE = new RegExp(String.raw`\b(${ROLE_PHRASE}(?:\s+(?:and|&)\s+${ROLE_PHRASE})?)\s+(?:of|at|@)\s+([^,.;|·\n]{2,45})`, 'i');
+
+/** A role and company stated in the description ("… co-founder of CG Tech, a company that …"). Used only when the title lacks them. */
+export function roleFromSnippet(snippet: string): { title: string; company: string } {
+  const m = SNIPPET_ROLE.exec(snippet);
+  if (!m || !/^[A-Z0-9]/.test(m[2].trim())) return { title: '', company: '' };
+  return { title: m[1].trim(), company: cleanCompany(m[2]).company };
+}
+
+/** A location stated in the description: "Location: Dubai, United Arab Emirates" or "Dubai, United Arab Emirates". */
+export function locationFromSnippet(snippet: string): string {
+  const labelled = /location:\s*([^·|.\n]{2,60})/i.exec(snippet);
+  if (labelled) return labelled[1].trim();
+  const named = /\b([A-Z][A-Za-z.'-]+(?:\s[A-Z][A-Za-z.'-]+){0,2},\s*(?:United Arab Emirates|UAE|United States|USA))\b/.exec(snippet);
+  return named ? named[1].trim() : '';
+}
+
 /** Turns one Serper result into a person, or null when it isn't a LinkedIn profile or has no name. */
 export function parsePerson(result: SerperResult, geo: Geo): Person | null {
   const linkedin = canonicalProfileUrl(result.link ?? '');
   if (!linkedin) return null;
   const title = String(result.title ?? '').replace(/\s*[|\-–]\s*LinkedIn\s*$/i, '');
   const [rawName, ...rest] = title.split(/\s+[-–—]\s+/);
-  const name = (rawName ?? '').trim();
+  const { name, hint } = splitName(rawName ?? '');
   if (!name) return null;
+  const snippet = result.snippet ?? '';
 
-  const fromTitle = splitRoleAndCompany((rest[0] ?? '').split(/\s*\|\s*/)[0]);
+  // Every piece of the title after the name, split on " - " and " | ": the role may be the second or third piece
+  // ("Name - Long headline | Founder & CEO | SAP & Cloud"), and a place or a company may stand alone.
+  const pieces = rest.flatMap((s) => s.split(/\s*\|\s*/)).map((p) => p.trim()).filter(Boolean);
+  let fromTitle = { title: '', company: '', companyTruncated: false };
+  let placeInTitle = '';
+  let lonelyCompany = '';
+  pieces.forEach((piece, i) => {
+    if (placeOnly(piece)) {
+      placeInTitle ||= piece;
+      return;
+    }
+    const s = splitRoleAndCompany(piece);
+    if (s.title && !fromTitle.title) fromTitle = s;
+    // "Name - Company | LinkedIn": a piece with no role counts as the company only when it comes first ("| MBA" does not).
+    else if (!s.title && i === 0 && looksLikeCompany(piece)) lonelyCompany = cleanCompany(piece).company;
+  });
+  if (!fromTitle.title) fromTitle.title = roleFromHint(hint);
+
   const sub = parseSubtitle(result.subtitle);
+  const subCompany = sub.company ? cleanCompany(sub.company).company : '';
   // The title usually has the fuller role; Google's line under it is the profile's current job and has the whole company name.
-  const useSubCompany = sub.company && (!fromTitle.company || fromTitle.companyTruncated);
+  const useSubCompany = !!subCompany && (!fromTitle.company || fromTitle.companyTruncated);
+  let titleOut = fromTitle.title || sub.title;
+  let company = useSubCompany ? subCompany : fromTitle.company || lonelyCompany;
+  let inferred = false;
+  if (!titleOut || !company) {
+    const s = roleFromSnippet(snippet);
+    if (!titleOut && s.title) {
+      titleOut = s.title;
+      inferred = true;
+    }
+    if (!company && s.company) {
+      company = s.company;
+      inferred = true;
+    }
+  }
+
+  const location = sub.location || placeInTitle || locationFromSnippet(snippet);
   return {
     name,
-    title: fromTitle.title || sub.title,
-    company: useSubCompany ? sub.company : fromTitle.company,
-    companyTruncated: useSubCompany ? false : fromTitle.companyTruncated,
-    location: sub.location,
-    geoMatch: geoMatch(sub.location, geo),
+    title: titleOut,
+    company,
+    companyTruncated: useSubCompany || !fromTitle.company ? false : fromTitle.companyTruncated,
+    location,
+    geoMatch: geoMatch(location, geo),
     linkedin,
-    snippet: result.snippet ?? '',
+    snippet,
+    inferred,
   };
 }
 
