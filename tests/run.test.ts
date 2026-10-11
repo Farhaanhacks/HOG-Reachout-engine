@@ -99,7 +99,8 @@ describe('searchesFor', () => {
 describe('createRun', () => {
   it('takes turns by market, Africa and Europe twice as often, and sizes the run to the target', async () => {
     const run = await createRun(db, { target: 120 });
-    expect(run.queries).toHaveLength(12);
+    expect(run.queries).toHaveLength(24); // searches are free; lookups are what the target caps
+    expect((await createRun(db, { target: 10 })).queries).toHaveLength(10);
     expect(run.queries.slice(0, 6).map((q) => q.market)).toEqual(['af', 'eu', 'us', 'af', 'eu', 'ae']);
     expect(run.queries.every((q) => q.page === 1 || run.queries.some((o) => o.key === q.key && o.market === q.market && o.page === q.page - 1))).toBe(true);
     expect(run.brief).toEqual({ markets: ['af', 'eu', 'us', 'ae'], target: 120 });
@@ -192,6 +193,16 @@ describe('runStep', () => {
 
     await runStep(svc, db, run.id, { dailyLimit: 600 });
     expect(lookups).toHaveLength(1); // the next page returns the same people: all saved already
+  });
+
+  it('looks up no more people than the run still needs', async () => {
+    const page = Array.from({ length: 30 }, (_, i) => found(`p${i}`, 'CEO'));
+    const people = Object.fromEntries(page.map((p) => [p.id, full(p.id)]));
+    const { svc, lookups } = fakeApollo(() => page, people);
+    const run = await createRun(db, { markets: ['af'], target: 10 });
+    const { run: after } = await runStep(svc, db, run.id, { dailyLimit: 600 });
+    expect(lookups.flat()).toHaveLength(10);
+    expect(after.apollo_with_email).toBe(10);
   });
 
   it('stops before paying once the daily lookup limit is reached', async () => {

@@ -6,7 +6,7 @@ import { EmailBadge, PersonName } from '../../components/badges';
 import type { Sequence } from '../../lib/apollo-sequences';
 import { api, formatDate, personalizeWaiting, post } from '../../lib/client';
 import type { OutreachStatus, PushSummary } from '../../lib/outreach';
-import { CUSTOM_FIELDS } from '../../lib/pitch';
+import { CUSTOM_FIELDS, type UnsubscribeStyle } from '../../lib/pitch';
 import type { SavedPerson } from '../../lib/store';
 
 type Inbox = { id: string; email: string; domain: string; usable: boolean; room: number; newToday: number; addedToday: number; paused: string };
@@ -18,6 +18,7 @@ type Overview = {
   inboxes: Inbox[];
   room: number;
   emailsPerPerson: number;
+  unsubscribeStyle: UnsubscribeStyle;
   missingFields: string[];
   template: { subject: string; body: string };
   apolloError: string;
@@ -28,6 +29,12 @@ type Overview = {
 type Preview = SavedPerson & { preview: { subject: string; body: string } };
 
 const SEQUENCE_KEY = 'hog-apollo-sequence';
+
+const STYLES: { id: UnsubscribeStyle; label: string; hint: string }[] = [
+  { id: 'apollo', label: "Apollo's one-click", hint: 'Gmail and Yahoo show an Unsubscribe button by the sender name (Google Workspace inboxes)' },
+  { id: 'reply', label: 'Reply to unsubscribe', hint: 'No link in the email at all; safest for spam filters' },
+  { id: 'link', label: 'Our own link', hint: 'Signed link to this site; put the site on your own domain first' },
+];
 
 const remembered = (key: string) => {
   try {
@@ -146,6 +153,13 @@ export default function OutreachPage() {
           ? `Added ${testEmail} to the sequence with a real personalized email, sending from ${d.from}. It arrives when the sequence's first step sends.`
           : `Apollo did not add ${testEmail}: ${d.reason ?? 'no reason given'}. Remove that contact from the sequence in Apollo to test again.`,
       );
+    });
+
+  const setStyle = (unsubscribeStyle: UnsubscribeStyle) =>
+    act(async () => {
+      await api('/api/settings', post({ unsubscribeStyle }));
+      setPreview(null);
+      await load();
     });
 
   const saveOpener = (personId: string, opener: string) =>
@@ -280,6 +294,27 @@ export default function OutreachPage() {
           </ol>
           {data && (
             <>
+              <div>
+                <div className="section-label">How people unsubscribe</div>
+                <div className="segmented" role="radiogroup" aria-label="How people unsubscribe">
+                  {STYLES.map((st) => (
+                    <button key={st.id} role="radio" aria-checked={data.unsubscribeStyle === st.id} className={data.unsubscribeStyle === st.id ? 'on' : ''} onClick={() => setStyle(st.id)} disabled={busy}>
+                      <b>{st.label}</b>
+                      <span>{st.hint}</span>
+                    </button>
+                  ))}
+                </div>
+                {data.unsubscribeStyle === 'apollo' && (
+                  <p className="muted small" style={{ marginTop: 8 }}>
+                    In Apollo, open Settings, Profile, Email settings and turn on one-click unsubscribe, and set the opt-out message. Opt-outs are copied back here automatically.
+                  </p>
+                )}
+                {data.unsubscribeStyle === 'reply' && (
+                  <p className="muted small" style={{ marginTop: 8 }}>
+                    Apollo stops the sequence on any reply, and anyone whose reply Apollo reads as unsubscribe or not interested is never contacted again.
+                  </p>
+                )}
+              </div>
               <div className="row">
                 <span className="muted small">Subject</span>
                 <code>{data.template.subject}</code>

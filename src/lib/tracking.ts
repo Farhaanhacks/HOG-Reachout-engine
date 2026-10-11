@@ -12,6 +12,8 @@ const URL_BASE = 'https://api.apollo.io/api/v1/emailer_messages/search';
 const PER_PAGE = 100;
 /** Replies that are interest: a meeting, a question, or pointing to the right person. */
 export const INTERESTED = ['willing_to_meet', 'follow_up_question', 'person_referral'];
+/** Replies that mean "do not contact me again". */
+export const OPTED_OUT_REPLIES = ['unsubscribe', 'not_interested'];
 const REPLY_CLASSES = [...INTERESTED, 'out_of_office', 'already_left_company_or_not_right_person', 'not_interested', 'unsubscribe', 'none_of_the_above'];
 
 type ApolloMessage = {
@@ -50,18 +52,18 @@ function url(params: { sequences: string[]; from: string; to: string; page: numb
   return `${URL_BASE}?${parts.join('&')}`;
 }
 
-async function saveMessages(db: Db, list: ApolloMessage[], mark: { opened?: boolean }): Promise<void> {
+async function saveMessages(db: Db, list: ApolloMessage[], mark: { opened?: boolean; unsubscribed?: boolean }): Promise<void> {
   for (const m of list) {
     if (!m.id) continue;
     await db.query(
       `INSERT INTO messages (id, contact_id, sequence_id, email_account_id, from_email, to_email, status, step, completed_at, happened_at, bounced, spam_blocked,
-         replied, reply_class, opened, not_sent_reason, synced_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now())
+         replied, reply_class, opened, not_sent_reason, unsubscribed, synced_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, now())
        ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, completed_at = COALESCE(EXCLUDED.completed_at, messages.completed_at),
          happened_at = COALESCE(EXCLUDED.happened_at, messages.happened_at), bounced = messages.bounced OR EXCLUDED.bounced,
          spam_blocked = messages.spam_blocked OR EXCLUDED.spam_blocked, replied = messages.replied OR EXCLUDED.replied,
          reply_class = COALESCE(NULLIF(EXCLUDED.reply_class, ''), messages.reply_class), opened = messages.opened OR EXCLUDED.opened,
-         not_sent_reason = EXCLUDED.not_sent_reason, synced_at = now()`,
+         not_sent_reason = EXCLUDED.not_sent_reason, unsubscribed = messages.unsubscribed OR EXCLUDED.unsubscribed, synced_at = now()`,
       [
         m.id,
         m.contact_id ?? '',
@@ -79,6 +81,7 @@ async function saveMessages(db: Db, list: ApolloMessage[], mark: { opened?: bool
         m.reply_class ?? '',
         !!mark.opened,
         m.not_sent_reason ?? '',
+        !!mark.unsubscribed,
       ],
     );
   }
@@ -104,11 +107,12 @@ export async function syncMessages(svc: Services, db: Db, opts: { budgetMs?: num
   const daysAgo = (n: number) => day(new Date(now.getTime() - n * 86_400_000));
   const recentFrom = last ? day(new Date(Math.max(Date.parse(last) - 3 * 86_400_000, now.getTime() - 30 * 86_400_000))) : daysAgo(7);
   const to = day(new Date(now.getTime() + 86_400_000));
-  const passes: { from: string; stats?: string[]; replyClasses?: string[]; opened?: boolean }[] = [
+  const passes: { from: string; stats?: string[]; replyClasses?: string[]; opened?: boolean; unsubscribed?: boolean }[] = [
     { from: recentFrom },
     { from: daysAgo(30), stats: ['bounced'] },
     { from: daysAgo(30), stats: ['spam_blocked'] },
     { from: daysAgo(30), replyClasses: REPLY_CLASSES },
+    { from: daysAgo(30), stats: ['unsubscribed'], unsubscribed: true },
     { from: daysAgo(7), stats: ['opened'], opened: true },
   ];
   const key = svc.keys.apollo;
@@ -125,7 +129,7 @@ export async function syncMessages(svc: Services, db: Db, opts: { budgetMs?: num
           { headers: { 'x-api-key': key, accept: 'application/json', 'cache-control': 'no-cache' } },
         );
         const list = res.emailer_messages ?? [];
-        await saveMessages(db, list, { opened: p.opened });
+        await saveMessages(db, list, { opened: p.opened, unsubscribed: p.unsubscribed });
         summary.messages += list.length;
         if (list.length < PER_PAGE) break;
       }
@@ -136,8 +140,24 @@ export async function syncMessages(svc: Services, db: Db, opts: { budgetMs?: num
     summary.complete = false;
     summary.error = (e as Error).message;
   }
+  await markOptOuts(db);
   if (summary.complete) await setSetting(db, 'messagesSyncedAt', now.toISOString());
   return summary;
+}
+
+/**
+ * Anyone who opted out through Apollo (its unsubscribe link or one-click header) or replied "unsubscribe" or "not
+ * interested" is marked unsubscribed, so the engine never contacts them again. Apollo has already stopped their
+ * sequence, so nothing is sent to Apollo.
+ */
+export async function markOptOuts(db: Db): Promise<number> {
+  const rows = await db.query(
+    `UPDATE people SET unsubscribed_at = now(), unsubscribe_blocked = TRUE
+     WHERE unsubscribed_at IS NULL AND apollo_contact_id <> '' AND apollo_contact_id IN (
+       SELECT contact_id FROM messages WHERE unsubscribed OR reply_class IN (${OPTED_OUT_REPLIES.map((c) => `'${c}'`).join(', ')})
+     ) RETURNING id`,
+  );
+  return rows.length;
 }
 
 /** When the last complete sync finished, or ''. */

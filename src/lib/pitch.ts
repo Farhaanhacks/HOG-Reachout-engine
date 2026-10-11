@@ -7,7 +7,20 @@ export const PITCH = {
   offer: 'Humans of Globe Media Features',
   callToAction: 'Share their leadership story for an upcoming global feature',
   socialProof: ['Okba Chabbi', 'Massey Whiteknife', 'Anja Vandenbergh'],
+  /** The price of putting the person on the cover of the edition. */
+  coverPrice: 'USD 2,500',
 };
+
+/**
+ * How the email lets people opt out:
+ *  - link: the engine's own signed unsubscribe link (works with any mailbox).
+ *  - apollo: Apollo's opt-out line ({{opt_out_message}}); with one-click unsubscribe turned on in Apollo, Gmail and Yahoo
+ *    also show an Unsubscribe button next to the sender's name. Opt-outs are copied back from Apollo.
+ *  - reply: no link at all; the person replies "unsubscribe". Apollo stops the sequence on any reply, and replies Apollo
+ *    classes as unsubscribe or not interested are never contacted again.
+ */
+export type UnsubscribeStyle = 'link' | 'apollo' | 'reply';
+export const UNSUBSCRIBE_STYLES: UnsubscribeStyle[] = ['link', 'apollo', 'reply'];
 
 /**
  * The Apollo custom contact fields that carry each person's own email parts into the sequence. The team creates these
@@ -48,12 +61,23 @@ function afterOpener(edition: string, industryLine: string): string {
 const PITCH_PARAGRAPHS = [
   'Humans of Globe publishes in-depth leadership stories in print and online, read by decision-makers and professionals around the world. Each feature is an interview told in your own voice and held to a high editorial standard, not a press release.',
   `Leaders such as ${PITCH.socialProof.slice(0, -1).join(', ')} and ${PITCH.socialProof[PITCH.socialProof.length - 1]} have shared their stories with us.`,
+  `A cover feature, with your story on the cover of the edition, is ${PITCH.coverPrice}.`,
   'Would you be open to sharing yours in the upcoming edition? Reply here and I will send over the details.',
 ];
 
-/** The last line of every email, plain-text version. */
+/** The last line of every email, plain-text version, for the engine's own link. */
 export function unsubscribeLineText(url: string): string {
   return `If you'd rather not hear from Humans of Globe, you can unsubscribe here: ${url}`;
+}
+
+/** Apollo's variable for its own opt-out line. */
+export const APOLLO_OPT_OUT = '{{opt_out_message}}';
+
+/** The last line of every email in the chosen style. `url` is the person's own unsubscribe link (link style only). */
+export function unsubscribeLine(style: UnsubscribeStyle, url: string): string {
+  if (style === 'apollo') return APOLLO_OPT_OUT;
+  if (style === 'reply') return 'If you would rather not hear from us again, just reply "unsubscribe" and we will not contact you again.';
+  return unsubscribeLineText(url);
 }
 
 /** "Dr. Ahmed Al Sayed" gives "Ahmed"; an empty name gives "there" (for "Hi there"). */
@@ -102,7 +126,7 @@ export function draftEmail(p: DraftInput): Draft {
  * The email to paste into the Apollo sequence's email step, once. Each person's subject, opener, edition, industry line
  * and unsubscribe link come from their custom fields, so every email is still personal; the rest is the same fixed pitch as draftEmail.
  */
-export function sequenceTemplate(): { subject: string; body: string } {
+export function sequenceTemplate(style: UnsubscribeStyle = 'link'): { subject: string; body: string } {
   return {
     subject: `{{${CUSTOM_FIELDS.subject}}}`,
     body: [
@@ -114,7 +138,7 @@ export function sequenceTemplate(): { subject: string; body: string } {
       '',
       PITCH_PARAGRAPHS.join('\n\n'),
       '',
-      unsubscribeLineText(`{{${CUSTOM_FIELDS.unsubscribe}}}`),
+      unsubscribeLine(style, `{{${CUSTOM_FIELDS.unsubscribe}}}`),
     ].join('\n'),
   };
 }

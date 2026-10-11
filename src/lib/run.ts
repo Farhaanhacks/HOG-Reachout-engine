@@ -13,7 +13,7 @@ import { checkLead, editionFor, matchTitle } from './targeting';
 
 /** The most searches one run plans. Each search reads one page of 50 people. */
 export const MAX_STEPS = 200;
-export const DEFAULT_TARGET = 500;
+export const DEFAULT_TARGET = 20;
 
 type RunRow = {
   id: number | string;
@@ -107,7 +107,8 @@ export async function createRun(db: Db, brief: { markets?: string[]; target?: nu
   }
   const turns = MARKET_TURNS.filter((m) => markets.includes(m));
   const pointer = new Map<Market, number>();
-  const maxSteps = clamp(opts.maxSteps ?? Math.ceil(target / 10), 1, MAX_STEPS);
+  // Searches are free, so a run plans plenty of them; what it pays for is capped by the target (see runStep).
+  const maxSteps = clamp(opts.maxSteps ?? Math.max(10, Math.ceil(target / 5)), 1, MAX_STEPS);
   const queries: RunQuery[] = [];
   for (let t = 0; queries.length < maxSteps && [...open.values()].some((l) => l.length); t++) {
     const m = turns[t % turns.length];
@@ -243,7 +244,9 @@ export async function runStep(svc: Services, db: Db, id: number | string, opts: 
   );
   const clients = await clientCompanies(db, wanted.map((p) => p.company));
   const fresh = wanted.filter((p) => !saved.has(p.id) && !clients.has(companyKey(p.company)));
-  const toLookUp = fresh.slice(0, room);
+  // Never pay for more people than the run still needs: a run of 10 looks up about 10, not a whole page.
+  const need = run.brief.target ? Math.max(0, run.brief.target - run.apollo_with_email) : room;
+  const toLookUp = fresh.slice(0, Math.min(room, need));
   summary.skipped = found.people.length - toLookUp.length;
 
   let matches: (ApolloMatch | null)[] = [];

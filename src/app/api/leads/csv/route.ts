@@ -4,7 +4,7 @@ import { toCsv } from '../../../../lib/csv';
 import { getDb } from '../../../../lib/db';
 import { marketShort } from '../../../../lib/markets';
 import { filtersFrom } from '../../../../lib/lead-filters';
-import { draftEmail, unsubscribeLineText } from '../../../../lib/pitch';
+import { draftEmail, unsubscribeLine } from '../../../../lib/pitch';
 import { unsubscribeUrl } from '../../../../lib/unsubscribe';
 import { getSettings } from '../../../../lib/settings';
 import { listPeople } from '../../../../lib/store';
@@ -18,7 +18,7 @@ export async function GET(req: Request) {
   if (denied) return denied;
   try {
     const db = getDb();
-    const { editions } = await getSettings(db);
+    const { editions, unsubscribeStyle } = await getSettings(db);
     const people = await listPeople(db, { ...filtersFrom(new URL(req.url)), limit: 1000 });
     const csv = toCsv(
       [
@@ -33,7 +33,7 @@ export async function GET(req: Request) {
           p.name, d.firstName, p.title, p.company, p.company_website ?? '', p.linkedin_url ?? '', p.email, p.email_status, p.company_employees ?? '',
           p.firm_size || p.company_size, p.industry ?? '', p.country || p.location, marketShort(p.geo), p.target_title ?? '',
           p.icp_fit === false ? 'no' : p.icp_fit ? 'yes' : '', p.segment ?? '', e.edition, p.suppressed_reason ?? '', p.sent_from_email ?? '', p.opener ?? '',
-          d.subject, `${d.body}\n\n${unsubscribeLineText(unsubscribeUrl(p.id))}`, unsubscribeUrl(p.id), p.unsubscribed_at ? 'yes' : '', p.first_seen,
+          d.subject, `${d.body}\n\n${unsubscribeLine(unsubscribeStyle, unsubscribeUrl(p.id))}`, unsubscribeUrl(p.id), p.unsubscribed_at ? 'yes' : '', p.first_seen,
         ];
       }),
     );

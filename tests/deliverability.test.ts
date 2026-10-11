@@ -108,7 +108,7 @@ describe('tracking', () => {
       opened: [{ id: 'm1', contact_id: 'c-a', completed_at: now }],
     });
     const s = await syncMessages(svc, db);
-    expect(s).toMatchObject({ complete: true, passes: 5 });
+    expect(s).toMatchObject({ complete: true, passes: 6 });
     expect(calls[0].getAll('emailer_campaign_ids[]')).toEqual(['s1']);
     expect(await totals(db)).toEqual({ people: 2, emails: 2, bounced: 1, spam: 0, opened: 1, replied: 1, interested: 1, unsubscribed: 0 });
     const bySegment = await breakdown(db, 'segment');
@@ -120,6 +120,26 @@ describe('tracking', () => {
     // The next sync reads only recent emails again, and keeps what was learned (the reply, the open).
     await syncMessages(fakeMessages({ all: [{ id: 'm1', contact_id: 'c-a', completed_at: now }] }).svc, db);
     expect(await totals(db)).toMatchObject({ replied: 1, opened: 1 });
+  });
+
+  it('never contacts again anyone who opted out in Apollo or replied unsubscribe or not interested', async () => {
+    await savePeople(
+      db,
+      ['a', 'b', 'c'].map((s) => ({ name: `${s.toUpperCase()} Person`, title: 'CEO', company: `${s}co`, companyTruncated: false, location: '', geoMatch: 'match' as const, linkedin: `https://www.linkedin.com/in/${s}`, snippet: '', inferred: false })),
+      'af',
+      'q',
+    );
+    for (const s of ['a', 'b', 'c']) await db.query(`UPDATE people SET apollo_contact_id = 'c-${s}', apollo_sequence_id = 's1' WHERE linkedin_url LIKE '%/${s}'`);
+    const now = new Date().toISOString();
+    await syncMessages(
+      fakeMessages({
+        unsubscribed: [{ id: 'm1', contact_id: 'c-a', completed_at: now }],
+        replies: [{ id: 'm2', contact_id: 'c-b', completed_at: now, replied: true, reply_class: 'not_interested' }, { id: 'm3', contact_id: 'c-c', completed_at: now, replied: true, reply_class: 'willing_to_meet' }],
+      }).svc,
+      db,
+    );
+    const rows = await db.query<{ name: string; out: boolean }>('SELECT name, unsubscribed_at IS NOT NULL AS out FROM people ORDER BY name');
+    expect(rows).toEqual([{ name: 'A Person', out: true }, { name: 'B Person', out: true }, { name: 'C Person', out: false }]);
   });
 });
 

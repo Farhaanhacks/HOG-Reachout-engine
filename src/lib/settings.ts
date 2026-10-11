@@ -1,14 +1,19 @@
+import { UNSUBSCRIBE_STYLES, type UnsubscribeStyle } from './pitch';
 import { ensureSchema, type Db } from './store';
 import { DEFAULT_EDITIONS, DEFAULT_RULES, cleanEditions, cleanRules, type Edition, type TitleRules } from './targeting';
 
 /**
  * Settings the team changes on the site (kept in the database, so a change needs no redeploy): the title rules, the
  * edition table, and how many emails each person gets in the sequence (used to turn an inbox's daily email limit into how
- * many new people it can start each day).
+ * many new people it can start each day), and how the email lets people opt out.
  */
-export type Settings = { rules: TitleRules; editions: Edition[]; emailsPerPerson: number };
+export type Settings = { rules: TitleRules; editions: Edition[]; emailsPerPerson: number; unsubscribeStyle: UnsubscribeStyle };
 
-export const DEFAULT_SETTINGS: Settings = { rules: DEFAULT_RULES, editions: DEFAULT_EDITIONS, emailsPerPerson: 3 };
+export const DEFAULT_SETTINGS: Settings = { rules: DEFAULT_RULES, editions: DEFAULT_EDITIONS, emailsPerPerson: 3, unsubscribeStyle: 'reply' };
+
+export function cleanUnsubscribeStyle(v: unknown): UnsubscribeStyle {
+  return UNSUBSCRIBE_STYLES.find((s) => s === v) ?? DEFAULT_SETTINGS.unsubscribeStyle;
+}
 
 export function cleanEmailsPerPerson(v: unknown): number {
   return Math.max(1, Math.min(10, Math.round(Number(v)) || DEFAULT_SETTINGS.emailsPerPerson));
@@ -40,11 +45,12 @@ export async function setSetting(db: Db, key: string, value: unknown): Promise<v
 
 export async function getSettings(db: Db): Promise<Settings> {
   await ensureSchema(db);
-  const [rules, editions, emailsPerPerson] = await Promise.all([read(db, 'rules'), read(db, 'editions'), read(db, 'emailsPerPerson')]);
+  const [rules, editions, emailsPerPerson, unsubscribeStyle] = await Promise.all([read(db, 'rules'), read(db, 'editions'), read(db, 'emailsPerPerson'), read(db, 'unsubscribeStyle')]);
   return {
     rules: rules === undefined ? DEFAULT_RULES : cleanRules(rules),
     editions: editions === undefined ? DEFAULT_EDITIONS : cleanEditions(editions),
     emailsPerPerson: emailsPerPerson === undefined ? DEFAULT_SETTINGS.emailsPerPerson : cleanEmailsPerPerson(emailsPerPerson),
+    unsubscribeStyle: cleanUnsubscribeStyle(unsubscribeStyle),
   };
 }
 
@@ -55,5 +61,6 @@ export async function saveSettings(db: Db, input: Partial<Record<keyof Settings,
   if (input.rules !== undefined) await setSetting(db, 'rules', cleanRules(input.rules));
   if (input.editions !== undefined) await setSetting(db, 'editions', cleanEditions(input.editions));
   if (input.emailsPerPerson !== undefined) await setSetting(db, 'emailsPerPerson', cleanEmailsPerPerson(input.emailsPerPerson));
+  if (input.unsubscribeStyle !== undefined) await setSetting(db, 'unsubscribeStyle', cleanUnsubscribeStyle(input.unsubscribeStyle));
   return getSettings(db);
 }

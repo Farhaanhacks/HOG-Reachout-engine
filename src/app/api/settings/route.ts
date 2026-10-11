@@ -16,14 +16,14 @@ export async function GET(req: Request) {
   }
 }
 
-/** Saves any of { rules, editions, emailsPerPerson }, or { reset: "rules" | "editions" | "emailsPerPerson" }. */
+/** Saves any of { rules, editions, emailsPerPerson, unsubscribeStyle }, or { reset: one of those names }. */
 export async function POST(req: Request) {
   const denied = checkPassword(req);
   if (denied) return denied;
   const body = (await req.json().catch(() => ({}))) as Partial<Record<keyof Settings, unknown>> & { reset?: string };
-  const reset = (['rules', 'editions', 'emailsPerPerson'] as const).find((k) => k === body.reset);
+  const reset = (['rules', 'editions', 'emailsPerPerson', 'unsubscribeStyle'] as const).find((k) => k === body.reset);
   try {
-    return NextResponse.json({ settings: await saveSettings(getDb(), { rules: body.rules, editions: body.editions, emailsPerPerson: body.emailsPerPerson, reset }) });
+    return NextResponse.json({ settings: await saveSettings(getDb(), { rules: body.rules, editions: body.editions, emailsPerPerson: body.emailsPerPerson, unsubscribeStyle: body.unsubscribeStyle, reset }) });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });
   }

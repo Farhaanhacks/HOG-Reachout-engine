@@ -12,14 +12,15 @@ import { SECTORS, SECTOR_LABEL } from '../../lib/targeting';
 
 const ratio = (a: number, b: number) => (b ? (a / b).toFixed(1) : '—');
 
+// Small runs while testing, so few credits are spent. The full-day run comes back later as a scheduled run.
 const TARGETS = [
-  { n: 100, label: 'Quick', hint: '100 new leads' },
-  { n: 250, label: 'Half day', hint: '250 new leads' },
-  { n: 500, label: 'Full day', hint: '500 new leads' },
+  { n: 10, label: 'Test', hint: '10 new leads' },
+  { n: 20, label: 'Small', hint: '20 new leads' },
+  { n: 50, label: 'Medium', hint: '50 new leads' },
 ];
 
 export default function RunPage() {
-  const [target, setTarget] = useState(500);
+  const [target, setTarget] = useState(20);
   const [run, setRun] = useState<Run | null>(null);
   const [history, setHistory] = useState<Run[]>([]);
   const [enrich, setEnrich] = useState<EnrichStatus | null>(null);
@@ -141,7 +142,7 @@ export default function RunPage() {
             </div>
           </div>
           <p className="muted small">
-            Searching is free. Each person looked up costs about 1 Apollo credit, and only people with a target title and a verified email on record are looked up.{' '}
+            Searching is free. Each person looked up costs about 1 Apollo credit; a run looks up about as many people as it asks for, and only those with a target title and a verified email on record.{' '}
             {left !== null && <>{left} lookups left today (limit {enrich?.dailyLimit}, set by <code>APOLLO_DAILY_LIMIT</code>).</>}
           </p>
           <div className="row">

@@ -162,6 +162,24 @@ describe('the Apollo contact and email', () => {
   });
 });
 
+describe('price and unsubscribe styles', () => {
+  it('states the USD 2,500 cover price in every email', () => {
+    const e = fullEmail({ id: 7, name: 'A B', title: 'CEO', company: 'Acme', email: 'a@acme.com', opener: 'Your Riyadh office caught our eye.' });
+    expect(e.body).toContain('A cover feature, with your story on the cover of the edition, is USD 2,500.');
+    expect(sequenceTemplate().body).toContain('USD 2,500');
+  });
+
+  it("ends with Apollo's opt-out line, a reply-to-unsubscribe line with no link, or the engine's own link", () => {
+    expect(sequenceTemplate('apollo').body.endsWith('{{opt_out_message}}')).toBe(true);
+    const reply = sequenceTemplate('reply').body;
+    expect(reply).toContain('just reply "unsubscribe"');
+    expect(reply).not.toMatch(/https?:|\{\{HOG Unsubscribe link\}\}/);
+    expect(sequenceTemplate('link').body).toContain('{{HOG Unsubscribe link}}');
+    const p = { id: 7, name: 'A B', title: 'CEO', company: 'Acme', email: 'a@acme.com', opener: 'x.' };
+    expect(fullEmail(p, { style: 'reply' }).body).not.toContain('http');
+  });
+});
+
 describe('listSequences', () => {
   it('reads every page and leaves out archived sequences', async () => {
     const { svc } = fakeApollo();

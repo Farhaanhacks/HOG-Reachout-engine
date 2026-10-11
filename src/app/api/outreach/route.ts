@@ -46,7 +46,8 @@ export async function GET(req: Request) {
       room,
       emailsPerPerson: settings.emailsPerPerson,
       missingFields: missing,
-      template: sequenceTemplate(),
+      template: sequenceTemplate(settings.unsubscribeStyle),
+      unsubscribeStyle: settings.unsubscribeStyle,
       apolloError,
       status: await outreachStatus(db, dailyLimit),
       held: await heldBack(db),
@@ -96,9 +97,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, status: await outreachStatus(db, outreachDailyLimitFromEnv()) });
     }
     if (body.action === 'preview') {
-      const { editions } = await getSettings(db);
+      const { editions, unsubscribeStyle } = await getSettings(db);
       const people = await pendingOutreach(db, limit);
-      return NextResponse.json({ people: people.map((p) => ({ ...p, preview: fullEmail(p, { editions }) })) });
+      return NextResponse.json({ people: people.map((p) => ({ ...p, preview: fullEmail(p, { editions, style: unsubscribeStyle }) })) });
     }
     if (body.action === 'push') {
       if (body.confirm !== true) return NextResponse.json({ error: 'Adding people to a sequence starts real emails: send confirm true.' }, { status: 400 });

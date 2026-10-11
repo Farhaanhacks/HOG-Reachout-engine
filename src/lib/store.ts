@@ -129,6 +129,7 @@ export async function ensureSchema(db: Db): Promise<void> {
     not_sent_reason TEXT NOT NULL DEFAULT '',
     synced_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`);
+  await db.query('ALTER TABLE messages ADD COLUMN IF NOT EXISTS unsubscribed BOOLEAN NOT NULL DEFAULT FALSE');
   await db.query('CREATE INDEX IF NOT EXISTS messages_contact ON messages (contact_id)');
   await db.query('CREATE INDEX IF NOT EXISTS messages_account ON messages (email_account_id, happened_at)');
   await db.query(`CREATE TABLE IF NOT EXISTS outreach_log (

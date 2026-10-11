@@ -1,7 +1,7 @@
 import { addToSequence, createContact, findCustomFields, missingFields, skipReason, type ApolloContactInput, type FieldIds } from './apollo-sequences';
 import { allocate, autoPause, mailboxStates, syncMailboxes, type MailboxState } from './deliverability';
 import { fallbackOpener, personalizeNext } from './personalize';
-import { draftEmail, unsubscribeLineText } from './pitch';
+import { draftEmail, unsubscribeLine, type UnsubscribeStyle } from './pitch';
 import { mapLimit, type Services } from './services';
 import { getSettings } from './settings';
 import { PERSON_COLUMNS, READY_SQL, ensureSchema, type Db, type SavedPerson } from './store';
@@ -42,10 +42,10 @@ export function emailParts(p: ContactSource, opts: { unsubscribeId?: number | st
 }
 
 /** The full email a person will receive, as the sequence template renders it. For previews. */
-export function fullEmail(p: ContactSource, opts: { unsubscribeId?: number | string; editions?: Edition[] } = {}): { subject: string; body: string } {
+export function fullEmail(p: ContactSource, opts: { unsubscribeId?: number | string; editions?: Edition[]; style?: UnsubscribeStyle } = {}): { subject: string; body: string } {
   const parts = emailParts(p, opts);
   const d = draftEmail({ ...p, opener: parts.opener, edition: parts.edition, industryLine: parts.industry });
-  return { subject: parts.subject, body: `${d.body}\n\n${unsubscribeLineText(parts.unsubscribe)}` };
+  return { subject: parts.subject, body: `${d.body}\n\n${unsubscribeLine(opts.style ?? 'link', parts.unsubscribe)}` };
 }
 
 /** A saved person as an Apollo contact, with their personal parts in the custom fields. */
