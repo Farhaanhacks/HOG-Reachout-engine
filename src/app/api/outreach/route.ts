@@ -6,6 +6,7 @@ import { heldBack, outreachDailyLimitFromEnv, outreachStatus, pendingOutreach, p
 import { personalizeNext, setOpener } from '../../../lib/personalize';
 import { keysFromEnv } from '../../../lib/services';
 import { listPeople } from '../../../lib/store';
+import { syncUnsubscribes } from '../../../lib/unsubscribe';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -25,6 +26,8 @@ export async function GET(req: Request) {
       } catch (e) {
         campaignError = (e as Error).message;
       }
+      // Anyone who unsubscribed while Instantly was unreachable is blocklisted now.
+      await syncUnsubscribes(svc, db).catch(() => 0);
     }
     const sent = (await listPeople(db, { limit: 1000 })).filter((p) => p.instantly_status).slice(0, 100);
     return NextResponse.json({

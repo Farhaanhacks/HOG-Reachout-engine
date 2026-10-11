@@ -25,6 +25,7 @@ export async function GET() {
     DEEPSEEK_API_KEY: set('DEEPSEEK_API_KEY'),
     APOLLO_API_KEY: set('APOLLO_API_KEY'),
     INSTANTLY_API_KEY: set('INSTANTLY_API_KEY'),
+    UNSUBSCRIBE_SECRET: set('UNSUBSCRIBE_SECRET'),
     database,
   });
 }

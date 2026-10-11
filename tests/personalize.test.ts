@@ -78,7 +78,7 @@ describe('personalizeNext', () => {
     await seed([person('A One', 'Alpha'), person('B Two', 'Beta'), person('C Three', 'Gamma')]);
     const { svc, news } = fakes({ Alpha: 'Your Riyadh office opening this year caught our eye.', Beta: '', Gamma: 'fail' });
     const summary = await personalizeNext(svc, db, 10);
-    expect(summary).toMatchObject({ done: 1, none: 1, failed: 1, searches: 3 });
+    expect(summary).toMatchObject({ done: 1, none: 1, failed: 1, searches: 6 }); // two news searches each: the person at the company, then the company
     expect(news).toEqual(expect.arrayContaining(['"Alpha"', '"Beta"', '"Gamma"']));
     expect(await row('Alpha')).toMatchObject({ opener: 'Your Riyadh office opening this year caught our eye.', opener_status: 'done', opener_fact: 'Riyadh office' });
     expect(await row('Beta')).toMatchObject({ opener: '', opener_status: 'none' });

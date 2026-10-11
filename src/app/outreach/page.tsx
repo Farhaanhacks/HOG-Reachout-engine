@@ -143,6 +143,7 @@ export default function OutreachPage() {
         <div className="stat"><div className="n">{data?.status.waiting ?? '—'}</div><div className="l">Personalized, ready to send</div></div>
         <div className="stat"><div className="n">{data?.status.noOpener ?? '—'}</div><div className="l">Held back (nothing specific)</div></div>
         <div className="stat"><div className="n">{data?.status.sent ?? '—'}</div><div className="l">In Instantly</div></div>
+        <div className="stat"><div className="n">{data?.status.unsubscribed ?? '—'}</div><div className="l">Unsubscribed</div></div>
         <div className="stat"><div className="n">{data ? `${data.status.sentToday}/${data.status.dailyLimit}` : '—'}</div><div className="l">Sent to Instantly today</div></div>
       </div>
 
@@ -150,7 +151,7 @@ export default function OutreachPage() {
         <section className="card">
           <h2>1. Personalize</h2>
           {data && !data.aiConfigured && <p className="warn-note">Add <code>DEEPSEEK_API_KEY</code> in Vercel to write personal openers.</p>}
-          <p className="muted small">For each person: one news search on their company, then DeepSeek writes one or two sentences using only what it found. Their name and email are never sent to DeepSeek. If nothing specific turns up, the person is held back for you to write a line by hand.</p>
+          <p className="muted small">For each person: a news search on them and their company, then DeepSeek writes one or two sentences using only what it found. Their name and email are never sent to DeepSeek. If nothing specific turns up, the person is held back for you to write a line by hand.</p>
           <div className="row">
             <label className="check">
               Personalize the next
@@ -160,7 +161,7 @@ export default function OutreachPage() {
             <button className="primary" onClick={doPersonalize} disabled={busy || !data?.aiConfigured || !data?.status.toPersonalize}>{busy && progress ? 'Personalizing…' : 'Personalize'}</button>
             {busy && <button className="danger" onClick={() => (stop.current = true)}>Stop</button>}
           </div>
-          <p className="muted small">Uses about one Serper credit and one small DeepSeek request per person.</p>
+          <p className="muted small">Uses about two Serper credits (news about the person, then their company) and one small DeepSeek request per person.</p>
           {progress && <p className="note small" role="status">{progress}</p>}
         </section>
 

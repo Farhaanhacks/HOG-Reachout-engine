@@ -5,6 +5,7 @@ import type { Person } from '../src/lib/linkedin';
 import { outreachStatus, pushToInstantly, sendTest, toInstantlyLead } from '../src/lib/outreach';
 import type { Services } from '../src/lib/services';
 import { savePeople, type Db } from '../src/lib/store';
+import { TEST_ID, unsubscribeUrl } from '../src/lib/unsubscribe';
 
 type Call = { url: string; method: string; headers: Record<string, string>; body: { campaign_id?: string; leads?: { email: string; first_name?: string; custom_variables?: Record<string, string> }[]; skip_if_in_workspace?: boolean } | null };
 
@@ -66,12 +67,20 @@ const statusOf = async (slug: string) =>
 
 describe('toInstantlyLead', () => {
   it('carries the name, company, title and the draft as custom variables', () => {
-    const lead = toInstantlyLead({ name: 'Dr. Ahmed Al Sayed', title: 'CEO', company: 'Acme', email: 'a@acme.com', linkedin_url: 'https://www.linkedin.com/in/a', geo: 'ae' });
+    const lead = toInstantlyLead({ id: 7, name: 'Dr. Ahmed Al Sayed', title: 'CEO', company: 'Acme', email: 'a@acme.com', linkedin_url: 'https://www.linkedin.com/in/a', geo: 'ae' });
     expect(lead).toMatchObject({ email: 'a@acme.com', first_name: 'Ahmed', last_name: 'Al Sayed', company_name: 'Acme', job_title: 'CEO' });
     expect(lead.custom_variables?.subject).toBe("Featuring Acme's leadership story");
     expect(lead.custom_variables?.body.startsWith('Hi Ahmed,')).toBe(true);
     expect(lead.custom_variables?.body_html).toContain('Hi Ahmed,<br><br>');
     expect(lead.custom_variables?.country).toBe('UAE');
+  });
+
+  it('ends every email with a working unsubscribe link for that person', () => {
+    const lead = toInstantlyLead({ id: 7, name: 'A B', title: 'CEO', company: 'Acme', email: 'a@acme.com', linkedin_url: '', geo: 'ae', opener: '' });
+    const url = unsubscribeUrl(7);
+    expect(lead.custom_variables?.unsubscribe_url).toBe(url);
+    expect(lead.custom_variables?.body.endsWith(`unsubscribe here: ${url}`)).toBe(true);
+    expect(lead.custom_variables?.body_html).toContain(`<a href="${url.replace(/&/g, '&amp;')}">unsubscribe here</a>`);
   });
 });
 
@@ -152,6 +161,7 @@ describe('sendTest', () => {
     expect(lead.email).toBe('me@team.com');
     expect(lead.first_name).toBe('A');
     expect(calls[0].body!.skip_if_in_workspace).toBe(false);
+    expect(lead.custom_variables?.unsubscribe_url).toBe(unsubscribeUrl(TEST_ID)); // a test link unsubscribes nobody
     expect(await statusOf('a')).toMatchObject({ instantly_status: '' });
   });
 

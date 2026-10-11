@@ -1,6 +1,7 @@
 import { geoShort } from './geo';
 import { addLeads, type InstantlyLead } from './instantly';
-import { draftEmail } from './pitch';
+import { draftEmail, unsubscribeLineHtml, unsubscribeLineText } from './pitch';
+import { TEST_ID, unsubscribeUrl } from './unsubscribe';
 import type { Services } from './services';
 import { READY_SQL, ensureSchema, type Db, type SavedPerson } from './store';
 
@@ -17,8 +18,13 @@ const html = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').repla
  * A saved person as an Instantly lead. The draft travels as custom variables, so the campaign's email step can be just
  * {{subject}} and {{body_html}} (or {{body}}): each lead then receives their own email.
  */
-export function toInstantlyLead(p: Pick<SavedPerson, 'name' | 'title' | 'company' | 'email' | 'linkedin_url' | 'geo' | 'opener'>): InstantlyLead {
+export function toInstantlyLead(
+  p: Pick<SavedPerson, 'id' | 'name' | 'title' | 'company' | 'email' | 'linkedin_url' | 'geo' | 'opener'>,
+  opts: { unsubscribeId?: number | string } = {},
+): InstantlyLead {
   const d = draftEmail(p);
+  // Every email ends with a working unsubscribe link unique to this person (a test send gets a link that unsubscribes nobody).
+  const unsubscribe = unsubscribeUrl(opts.unsubscribeId ?? p.id);
   const words = p.name.trim().split(/\s+/).filter(Boolean);
   const at = words.findIndex((w) => w.toLowerCase() === d.firstName.toLowerCase());
   const lastName = at >= 0 ? words.slice(at + 1).join(' ') : words.slice(1).join(' ');
@@ -26,8 +32,9 @@ export function toInstantlyLead(p: Pick<SavedPerson, 'name' | 'title' | 'company
     email: p.email,
     custom_variables: {
       subject: d.subject,
-      body: d.body,
-      body_html: d.body.split('\n').map(html).join('<br>'),
+      body: `${d.body}\n\n${unsubscribeLineText(unsubscribe)}`,
+      body_html: `${d.body.split('\n').map(html).join('<br>')}<br><br>${unsubscribeLineHtml(unsubscribe)}`,
+      unsubscribe_url: unsubscribe,
       linkedin: p.linkedin_url,
       country: geoShort(p.geo),
     },
@@ -66,6 +73,7 @@ export type OutreachStatus = {
   noOpener: number;
   sent: number;
   skipped: number;
+  unsubscribed: number;
   sentToday: number;
   dailyLimit: number;
 };
@@ -73,16 +81,18 @@ export type OutreachStatus = {
 export async function outreachStatus(db: Db, dailyLimit = DEFAULT_OUTREACH_DAILY_LIMIT): Promise<OutreachStatus> {
   await ensureSchema(db);
   const unsent = `${READY_SQL} AND email <> '' AND instantly_status = ''`;
-  const [p] = await db.query<{ waiting: number; to_personalize: number; no_opener: number; sent: number; skipped: number }>(
+  const [p] = await db.query<{ waiting: number; to_personalize: number; no_opener: number; sent: number; skipped: number; unsubscribed: number }>(
     `SELECT count(*) FILTER (WHERE ${unsent} AND opener_status = 'done' AND opener <> '')::int AS waiting,
             count(*) FILTER (WHERE ${unsent} AND opener_status = '')::int AS to_personalize,
             count(*) FILTER (WHERE ${unsent} AND opener_status = 'none')::int AS no_opener,
             count(*) FILTER (WHERE instantly_status = 'added')::int AS sent,
-            count(*) FILTER (WHERE instantly_status = 'skipped')::int AS skipped
+            count(*) FILTER (WHERE instantly_status = 'skipped')::int AS skipped,
+            count(*) FILTER (WHERE unsubscribed_at IS NOT NULL)::int AS unsubscribed
      FROM people`,
   );
   const [t] = await db.query<{ n: number }>(`SELECT coalesce(sum(requested), 0)::int AS n FROM outreach_log WHERE ran_at >= date_trunc('day', now())`);
   return {
+    unsubscribed: p?.unsubscribed ?? 0,
     waiting: p?.waiting ?? 0,
     toPersonalize: p?.to_personalize ?? 0,
     noOpener: p?.no_opener ?? 0,
@@ -162,7 +172,7 @@ export async function sendTest(svc: Services, db: Db, opts: { campaignId: string
   const [person] = opts.personId
     ? await db.query<SavedPerson>(`SELECT ${COLUMNS} FROM people WHERE id = $1`, [opts.personId])
     : await db.query<SavedPerson>(`SELECT ${COLUMNS} FROM people WHERE ${READY_SQL} ORDER BY (opener_status = 'done') DESC, COALESCE(rank, 3), id LIMIT 1`);
-  const sample = person ?? { name: 'Test Person', title: 'CEO', company: 'Example Company', linkedin_url: '', geo: 'ae', email: '', opener: '' };
-  const res = await addLeads(svc, opts.campaignId, [toInstantlyLead({ ...sample, email: opts.testEmail })], { skipIfInWorkspace: false });
+  const sample = person ?? { id: TEST_ID, name: 'Test Person', title: 'CEO', company: 'Example Company', linkedin_url: '', geo: 'ae', email: '', opener: '' };
+  const res = await addLeads(svc, opts.campaignId, [toInstantlyLead({ ...sample, email: opts.testEmail }, { unsubscribeId: TEST_ID })], { skipIfInWorkspace: false });
   return { added: res.created_leads.length > 0, skipped: res.skipped_count + res.duplicate_email_count + res.duplicated_leads };
 }

@@ -14,6 +14,17 @@ export type Draft = { firstName: string; subject: string; body: string };
 
 const HONORIFIC = /^(dr|mr|mrs|ms|miss|eng|engr|prof|sir|he|h\.e|sheikh|shaikh)\.?$/i;
 
+/** The last line of every email, plain-text version. */
+export function unsubscribeLineText(url: string): string {
+  return `If you'd rather not hear from Humans of Globe, you can unsubscribe here: ${url}`;
+}
+
+/** The last line of every email, HTML version, with a working link. */
+export function unsubscribeLineHtml(url: string): string {
+  const safe = url.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  return `If you'd rather not hear from Humans of Globe, you can <a href="${safe}">unsubscribe here</a>.`;
+}
+
 /** "Dr. Ahmed Al Sayed" gives "Ahmed"; an empty name gives "there" (for "Hi there"). */
 export function firstNameOf(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);

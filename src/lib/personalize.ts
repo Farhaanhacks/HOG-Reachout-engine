@@ -85,10 +85,22 @@ export async function personalizeNext(svc: Services, db: Db, limit: number): Pro
   await mapLimit(leads, 4, async (lead) => {
     try {
       const geo: Geo = isGeo(lead.geo) ? lead.geo : 'us';
-      let news: NewsResult[] = [];
+      // News about the person at their company first (most personal), then about the company. A name alone is too
+      // ambiguous to search, so without a company there is no news search. Searches go to Google through Serper;
+      // only what DeepSeek sees is stripped of the name.
+      const news: NewsResult[] = [];
       if (lead.company) {
-        summary.searches++;
-        news = await newsSearch(svc, `"${lead.company}"`, geo).catch(() => []);
+        const seen = new Set<string>();
+        for (const q of [`"${lead.name}" "${lead.company}"`, `"${lead.company}"`]) {
+          summary.searches++;
+          for (const n of await newsSearch(svc, q, geo).catch(() => [] as NewsResult[])) {
+            const key = n.link || n.title || '';
+            if (key && !seen.has(key)) {
+              seen.add(key);
+              news.push(n);
+            }
+          }
+        }
       }
       const reply = await askDeepSeekJson(svc, SYSTEM_PROMPT, factsFor(lead, news));
       const opener = cleanOpener(reply?.opener);
