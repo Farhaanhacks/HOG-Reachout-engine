@@ -50,7 +50,13 @@ export async function ensureSchema(db: Db): Promise<void> {
     ADD COLUMN IF NOT EXISTS opener_status TEXT NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS personalized_at TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS unsubscribed_at TIMESTAMPTZ,
-    ADD COLUMN IF NOT EXISTS unsubscribe_blocked BOOLEAN NOT NULL DEFAULT FALSE`);
+    ADD COLUMN IF NOT EXISTS unsubscribe_blocked BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS sequence_status TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS apollo_contact_id TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS apollo_sequence_id TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS sequence_note TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS sequenced_at TIMESTAMPTZ`);
+  // (The instantly_* columns above are from the earlier Instantly setup and are no longer used.)
   await db.query(`CREATE TABLE IF NOT EXISTS outreach_log (
     id BIGSERIAL PRIMARY KEY,
     ran_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -180,9 +186,11 @@ export type SavedPerson = {
   company_employees: number | null;
   /** fit, big_enough, too_small, too_large, unknown, or '' before Apollo (see size.ts). */
   company_size: string;
-  /** '' = not sent; 'added' = in an Instantly campaign; 'skipped' = Instantly declined (already there, invalid, blocklisted). */
-  instantly_status?: string;
-  instantly_at?: string | null;
+  /** '' = not sent; 'added' = in an Apollo sequence; 'skipped' = Apollo declined (e.g. already in another sequence). */
+  sequence_status?: string;
+  /** Apollo's reason when it declined. */
+  sequence_note?: string;
+  sequenced_at?: string | null;
   /** The personal first line of their email, written from research (see personalize.ts). */
   opener?: string;
   opener_fact?: string;
@@ -231,7 +239,7 @@ export async function listPeople(db: Db, opts: ListOptions = {}): Promise<SavedP
   params.push(Math.min(Math.max(opts.limit ?? 200, 1), 1000));
   return db.query<SavedPerson>(
     `SELECT id, linkedin_url, name, title, company, location, geo, geo_match, labels, is_target, inferred, status, seen_count, first_seen, last_seen,
-            email, email_status, apollo_status, apollo_confidence, apollo_tier, rank, company_employees, company_size, instantly_status, instantly_at,
+            email, email_status, apollo_status, apollo_confidence, apollo_tier, rank, company_employees, company_size, sequence_status, sequence_note, sequenced_at,
             opener, opener_fact, opener_status, unsubscribed_at
      FROM people ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
      ORDER BY ${opts.orderBy === 'emails' ? 'apollo_checked_at DESC NULLS LAST,' : ''} first_seen DESC, id DESC LIMIT $${params.length}`,

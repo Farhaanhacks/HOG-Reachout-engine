@@ -16,23 +16,25 @@ beforeEach(async () => {
   db = { query: async (text, params = []) => (await pg.query(text, params as unknown[])).rows as never };
 });
 
-/** A fake Instantly blocklist; `fail` makes it unreachable. */
-function fakeBlocklist(fail = false) {
-  const blocked: string[] = [];
-  const f = (async (_url: string, init: RequestInit) => {
-    if (fail) return new Response('{"message":"down"}', { status: 503 });
-    blocked.push(JSON.parse(String(init.body)).bl_value);
-    return new Response('{"id":"b1"}', { status: 200 });
+/** A fake Apollo "stop in sequence" endpoint; `fail` makes it unreachable. Records the query of each stop. */
+function fakeApollo(fail = false) {
+  const stops: URLSearchParams[] = [];
+  const f = (async (url: string) => {
+    if (fail) return new Response('{"error":"down"}', { status: 503 });
+    stops.push(new URL(url).searchParams);
+    return new Response('{"num_contacts":1}', { status: 200 });
   }) as unknown as typeof fetch;
-  const svc: Services = { fetch: f, keys: { serper: '', jina: '', deepseek: '', instantly: 'k' } };
-  return { svc, blocked };
+  const svc: Services = { fetch: f, keys: { serper: '', jina: '', deepseek: '', apollo: 'master-key' } };
+  return { svc, stops };
 }
 
 const person: Person = { name: 'A One', title: 'CEO', company: 'Alpha', companyTruncated: false, location: 'Dubai', geoMatch: 'match', linkedin: 'https://www.linkedin.com/in/a', snippet: '', inferred: false };
 
-async function seedOne(): Promise<number> {
+/** One person with a personalized email; `sequenced` also puts them in an Apollo sequence. */
+async function seedOne(sequenced = true): Promise<number> {
   await savePeople(db, [person], 'ae', 'q');
   await db.query("UPDATE people SET email = 'a@alpha.com', apollo_status = 'matched', company_size = 'fit', opener = 'Your Riyadh office caught our eye.', opener_status = 'done'");
+  if (sequenced) await db.query("UPDATE people SET sequence_status = 'added', apollo_contact_id = 'c-1', apollo_sequence_id = 'seq-1'");
   return (await db.query<{ id: number }>('SELECT id FROM people'))[0].id;
 }
 
@@ -47,36 +49,45 @@ describe('tokens', () => {
 });
 
 describe('unsubscribe', () => {
-  it('marks the person, blocklists the email in Instantly, and stops all sending to them', async () => {
+  it('stops the person in their Apollo sequence and never sends to them again', async () => {
     const id = await seedOne();
-    expect(await pendingOutreach(db, 10)).toHaveLength(1);
-    const { svc, blocked } = fakeBlocklist();
+    const { svc, stops } = fakeApollo();
     expect(await unsubscribe(svc, db, unsubscribeToken(id))).toBe('unsubscribed');
-    expect(blocked).toEqual(['a@alpha.com']);
-    expect(await pendingOutreach(db, 10)).toHaveLength(0);
-    expect(await outreachStatus(db)).toMatchObject({ unsubscribed: 1, waiting: 0 });
-    // Clicking again changes nothing and does not blocklist twice.
+    expect(stops).toHaveLength(1);
+    expect(stops[0].getAll('emailer_campaign_ids[]')).toEqual(['seq-1']);
+    expect(stops[0].getAll('contact_ids[]')).toEqual(['c-1']);
+    expect(stops[0].get('mode')).toBe('stop');
+    expect(await outreachStatus(db)).toMatchObject({ unsubscribed: 1 });
+    // Clicking again changes nothing and does not stop twice.
     expect(await unsubscribe(svc, db, unsubscribeToken(id))).toBe('unsubscribed');
-    expect(blocked).toHaveLength(1);
+    expect(stops).toHaveLength(1);
   });
 
-  it('still unsubscribes when Instantly is down, and blocklists later', async () => {
-    const id = await seedOne();
-    expect(await unsubscribe(fakeBlocklist(true).svc, db, unsubscribeToken(id))).toBe('unsubscribed');
+  it('keeps someone not yet sent out of every future send', async () => {
+    const id = await seedOne(false);
+    expect(await pendingOutreach(db, 10)).toHaveLength(1);
+    const { svc, stops } = fakeApollo();
+    expect(await unsubscribe(svc, db, unsubscribeToken(id))).toBe('unsubscribed');
+    expect(stops).toHaveLength(0); // nothing to stop in Apollo
     expect(await pendingOutreach(db, 10)).toHaveLength(0);
-    const { svc, blocked } = fakeBlocklist();
+  });
+
+  it('still unsubscribes when Apollo is down, and stops the sequence later', async () => {
+    const id = await seedOne();
+    expect(await unsubscribe(fakeApollo(true).svc, db, unsubscribeToken(id))).toBe('unsubscribed');
+    const { svc, stops } = fakeApollo();
     expect(await syncUnsubscribes(svc, db)).toBe(1);
-    expect(blocked).toEqual(['a@alpha.com']);
+    expect(stops).toHaveLength(1);
     expect(await syncUnsubscribes(svc, db)).toBe(0);
   });
 
   it('does nothing for a test link or a bad link', async () => {
-    await seedOne();
-    const { svc, blocked } = fakeBlocklist();
+    await seedOne(false);
+    const { svc, stops } = fakeApollo();
     expect(await unsubscribe(svc, db, unsubscribeToken(TEST_ID))).toBe('test');
     expect(await unsubscribe(svc, db, 'nonsense')).toBe('invalid');
     expect(await unsubscribe(svc, db, unsubscribeToken(999))).toBe('invalid');
-    expect(blocked).toEqual([]);
+    expect(stops).toEqual([]);
     expect(await pendingOutreach(db, 10)).toHaveLength(1);
   });
 });

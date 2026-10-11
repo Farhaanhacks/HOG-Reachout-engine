@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
+import { findCustomFields, listEmailAccounts, listSequences, missingFields, type EmailAccount, type Sequence } from '../../../lib/apollo-sequences';
 import { checkPassword } from '../../../lib/auth';
 import { getDb } from '../../../lib/db';
-import { listCampaigns } from '../../../lib/instantly';
-import { heldBack, outreachDailyLimitFromEnv, outreachStatus, pendingOutreach, pushToInstantly, sendTest, toInstantlyLead } from '../../../lib/outreach';
+import { fullEmail, heldBack, outreachDailyLimitFromEnv, outreachStatus, pendingOutreach, pushToApollo, sendTest } from '../../../lib/outreach';
 import { personalizeNext, personalizeOne, setOpener } from '../../../lib/personalize';
+import { CUSTOM_FIELDS, sequenceTemplate } from '../../../lib/pitch';
 import { keysFromEnv } from '../../../lib/services';
 import { listPeople } from '../../../lib/store';
 import { syncUnsubscribes } from '../../../lib/unsubscribe';
@@ -11,31 +12,37 @@ import { syncUnsubscribes } from '../../../lib/unsubscribe';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-/** Status, the Instantly campaigns, who is held back, and who was sent most recently. Spends nothing. */
+/** Status, the Apollo sequences, mailboxes and custom-field check, the template to paste, and who was sent recently. Spends nothing. */
 export async function GET(req: Request) {
   const denied = checkPassword(req);
   if (denied) return denied;
   const svc = { fetch, keys: keysFromEnv() };
   try {
     const db = getDb();
-    let campaigns: Awaited<ReturnType<typeof listCampaigns>> = [];
-    let campaignError = '';
-    if (svc.keys.instantly) {
+    let sequences: Sequence[] = [];
+    let emailAccounts: EmailAccount[] = [];
+    let missing: string[] = Object.values(CUSTOM_FIELDS);
+    let apolloError = '';
+    if (svc.keys.apollo) {
       try {
-        campaigns = await listCampaigns(svc);
+        [sequences, emailAccounts, missing] = await Promise.all([listSequences(svc), listEmailAccounts(svc), findCustomFields(svc).then(missingFields)]);
       } catch (e) {
-        campaignError = (e as Error).message;
+        apolloError = (e as Error).message;
       }
-      // Anyone who unsubscribed while Instantly was unreachable is blocklisted now.
+      // Anyone who unsubscribed while Apollo was unreachable has their sequence stopped now.
       await syncUnsubscribes(svc, db).catch(() => 0);
     }
-    const sent = (await listPeople(db, { limit: 1000 })).filter((p) => p.instantly_status).slice(0, 100);
+    const sent = (await listPeople(db, { limit: 1000 })).filter((p) => p.sequence_status).slice(0, 100);
     return NextResponse.json({
-      configured: !!svc.keys.instantly,
+      configured: !!svc.keys.apollo,
       aiConfigured: !!svc.keys.deepseek,
-      defaultCampaignId: process.env.INSTANTLY_CAMPAIGN_ID ?? '',
-      campaigns,
-      campaignError,
+      defaultSequenceId: process.env.APOLLO_SEQUENCE_ID ?? '',
+      defaultEmailAccountId: process.env.APOLLO_EMAIL_ACCOUNT_ID ?? '',
+      sequences,
+      emailAccounts,
+      missingFields: missing,
+      template: sequenceTemplate(),
+      apolloError,
       status: await outreachStatus(db, outreachDailyLimitFromEnv()),
       held: await heldBack(db),
       sent,
@@ -46,17 +53,27 @@ export async function GET(req: Request) {
 }
 
 /**
- * action "personalize": writes openers for the next `limit` people (Serper news + DeepSeek).
+ * action "personalize": writes openers for the next `limit` people waiting (Serper news + DeepSeek).
+ * action "personalize-one": personalizes one person { personId }.
  * action "opener": saves an opener written or edited by the team { personId, opener }.
  * action "preview": who would be sent next, with their full email. Spends nothing.
- * action "push" with confirm true: sends up to `limit` personalized people to the campaign.
- * action "test": one personalized email to a test address the team owns.
+ * action "push" with confirm true: adds up to `limit` personalized people to the sequence { sequenceId, emailAccountId }.
+ * action "test": one real personalized email to a test address the team owns { sequenceId, emailAccountId, testEmail }.
  */
 export async function POST(req: Request) {
   const denied = checkPassword(req);
   if (denied) return denied;
-  const body = (await req.json().catch(() => ({}))) as { action?: string; limit?: number; confirm?: boolean; campaignId?: string; testEmail?: string; personId?: string; opener?: string };
-  const limit = Math.max(1, Math.min(Number(body.limit) || 25, 500));
+  const body = (await req.json().catch(() => ({}))) as {
+    action?: string;
+    limit?: number;
+    confirm?: boolean;
+    sequenceId?: string;
+    emailAccountId?: string;
+    testEmail?: string;
+    personId?: string;
+    opener?: string;
+  };
+  const limit = Math.max(1, Math.min(Number(body.limit) || 25, 50));
   const svc = { fetch, keys: keysFromEnv() };
   try {
     const db = getDb();
@@ -75,17 +92,29 @@ export async function POST(req: Request) {
     }
     if (body.action === 'preview') {
       const people = await pendingOutreach(db, limit);
-      return NextResponse.json({ people: people.map((p) => ({ ...p, lead: toInstantlyLead(p) })) });
+      return NextResponse.json({ people: people.map((p) => ({ ...p, preview: fullEmail(p) })) });
     }
     if (body.action === 'push') {
-      if (body.confirm !== true) return NextResponse.json({ error: 'Sending to Instantly starts real emails: send confirm true.' }, { status: 400 });
-      const summary = await pushToInstantly(svc, db, { campaignId: String(body.campaignId ?? ''), limit, dailyLimit: outreachDailyLimitFromEnv() });
+      if (body.confirm !== true) return NextResponse.json({ error: 'Adding people to a sequence starts real emails: send confirm true.' }, { status: 400 });
+      const summary = await pushToApollo(svc, db, {
+        sequenceId: String(body.sequenceId ?? ''),
+        emailAccountId: String(body.emailAccountId ?? ''),
+        limit,
+        dailyLimit: outreachDailyLimitFromEnv(),
+      });
       return NextResponse.json({ summary, status: await outreachStatus(db, outreachDailyLimitFromEnv()) });
     }
     if (body.action === 'test') {
-      return NextResponse.json(await sendTest(svc, db, { campaignId: String(body.campaignId ?? ''), testEmail: String(body.testEmail ?? '').trim(), personId: body.personId || undefined }));
+      return NextResponse.json(
+        await sendTest(svc, db, {
+          sequenceId: String(body.sequenceId ?? ''),
+          emailAccountId: String(body.emailAccountId ?? ''),
+          testEmail: String(body.testEmail ?? '').trim(),
+          personId: body.personId || undefined,
+        }),
+      );
     }
-    return NextResponse.json({ error: 'Send action "personalize", "opener", "preview", "push" or "test".' }, { status: 400 });
+    return NextResponse.json({ error: 'Send action "personalize", "personalize-one", "opener", "preview", "push" or "test".' }, { status: 400 });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });
   }

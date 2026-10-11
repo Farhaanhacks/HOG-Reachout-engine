@@ -75,7 +75,7 @@ export type PersonalizeSummary = { done: number; none: number; failed: number; s
 async function waiting(db: Db, limit: number): Promise<Lead[]> {
   return db.query<Lead>(
     `SELECT id, name, title, company, geo, snippet FROM people
-     WHERE ${READY_SQL} AND email <> '' AND instantly_status = '' AND opener_status IN ('', 'none')
+     WHERE ${READY_SQL} AND email <> '' AND sequence_status = '' AND opener_status IN ('', 'none')
      ORDER BY COALESCE(rank, 3) ASC, apollo_checked_at ASC NULLS LAST, id ASC LIMIT $1`,
     [Math.max(1, Math.min(limit, 25))],
   );

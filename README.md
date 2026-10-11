@@ -17,13 +17,13 @@ Stack: TypeScript, Next.js 16, React 19, Vitest.
    | `APP_PASSWORD` | yes | Password the Step 1 page asks for. Without it the API refuses to run in production. |
    | `SERPER_API_KEY` | yes | Key from serper.dev |
    | `DATABASE_URL` | yes (step 6) | Postgres connection string (Supabase: Transaction pooler) |
-   | `APOLLO_API_KEY` | yes (step 9) | Apollo API key; needs a plan with API access |
+   | `APOLLO_API_KEY` | yes (step 9) | Apollo master API key: finds emails and sends through sequences |
+   | `APOLLO_SEQUENCE_ID` | optional | Sequence chosen by default on the Outreach page |
+   | `APOLLO_EMAIL_ACCOUNT_ID` | optional | Sending mailbox chosen by default on the Outreach page |
+   | `OUTREACH_DAILY_LIMIT` | optional | Most people added to Apollo sequences per day (default 500) |
    | `APOLLO_DAILY_LIMIT` | optional | Most people sent to Apollo per day (default 100) |
-   | `INSTANTLY_API_KEY` | yes (step 10) | Instantly API key, allowed to read campaigns, create leads and create block list entries |
    | `UNSUBSCRIBE_SECRET` | yes (step 10) | Long random string that signs unsubscribe links. Set once, never change. |
    | `APP_URL` | optional | Public address for unsubscribe links when using a custom domain |
-   | `INSTANTLY_CAMPAIGN_ID` | optional | Campaign chosen by default on the Outreach page |
-   | `INSTANTLY_DAILY_LIMIT` | optional | Most leads sent to Instantly per day (default 500) |
    | `JINA_API_KEY` | later | Used from step 5 |
    | `DEEPSEEK_API_KEY` | later | Used from step 4 onward |
 

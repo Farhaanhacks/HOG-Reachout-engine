@@ -1,11 +1,12 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { getJson, type Services } from './services';
+import { stopInSequences } from './apollo-sequences';
+import type { Services } from './services';
 import { ensureSchema, type Db } from './store';
 
 /**
  * Unsubscribe links: every email ends with a link unique to the person, signed so nobody can unsubscribe someone else
- * by guessing. Unsubscribing marks the person in the database (they are never personalized or sent again) and adds
- * their email to the Instantly blocklist, so no campaign emails them.
+ * by guessing. Unsubscribing marks the person in the database (they are never personalized or sent again) and stops
+ * their Apollo sequence.
  *
  * The signing secret is UNSUBSCRIBE_SECRET. Set it once and never change it: changing it breaks the links in emails
  * already sent. Without it the app password is used.
@@ -53,36 +54,36 @@ export function unsubscribeUrl(id: number | string): string {
   return `${siteUrl()}/unsubscribe?t=${unsubscribeToken(id)}`;
 }
 
-/** Adds an email to the Instantly blocklist, so no campaign sends to it. */
-export async function blockInInstantly(svc: Services, email: string): Promise<void> {
-  if (!svc.keys.instantly) throw new Error('INSTANTLY_API_KEY is not set');
-  await getJson(svc, 'https://api.instantly.ai/api/v2/block-lists-entries', {
-    method: 'POST',
-    headers: { authorization: `Bearer ${svc.keys.instantly}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ bl_value: email }),
-  });
-}
-
 export type UnsubscribeResult = 'unsubscribed' | 'test' | 'invalid';
 
+type Row = { id: number | string; apollo_contact_id: string; apollo_sequence_id: string };
+
 /**
- * Unsubscribes the person a token names. Safe to repeat. If the Instantly blocklist cannot be reached now, the person
- * is still marked and the blocklist is retried by syncUnsubscribes.
+ * Stops the person in the Apollo sequence they were added to. Someone never added to a sequence has nothing to stop.
+ * Throws when Apollo cannot be reached, so the caller can retry later.
+ */
+async function stopInApollo(svc: Services, db: Db, row: Row): Promise<void> {
+  if (row.apollo_contact_id && row.apollo_sequence_id) await stopInSequences(svc, [row.apollo_sequence_id], [row.apollo_contact_id]);
+  await db.query('UPDATE people SET unsubscribe_blocked = TRUE WHERE id = $1', [row.id]);
+}
+
+/**
+ * Unsubscribes the person a token names. Safe to repeat. They are marked at once, so they are never personalized or
+ * sent again, and their Apollo sequence is stopped. If Apollo cannot be reached now, that is retried by syncUnsubscribes.
  */
 export async function unsubscribe(svc: Services, db: Db, token: string | null | undefined): Promise<UnsubscribeResult> {
   const id = readToken(token);
   if (!id) return 'invalid';
   if (id === TEST_ID) return 'test';
   await ensureSchema(db);
-  const [row] = await db.query<{ email: string; unsubscribe_blocked: boolean }>(
-    'UPDATE people SET unsubscribed_at = COALESCE(unsubscribed_at, now()) WHERE id = $1 RETURNING email, unsubscribe_blocked',
+  const [row] = await db.query<Row & { unsubscribe_blocked: boolean }>(
+    'UPDATE people SET unsubscribed_at = COALESCE(unsubscribed_at, now()) WHERE id = $1 RETURNING id, apollo_contact_id, apollo_sequence_id, unsubscribe_blocked',
     [id],
   );
   if (!row) return 'invalid';
-  if (row.email && !row.unsubscribe_blocked && svc.keys.instantly) {
+  if (!row.unsubscribe_blocked && svc.keys.apollo) {
     try {
-      await blockInInstantly(svc, row.email);
-      await db.query('UPDATE people SET unsubscribe_blocked = TRUE WHERE id = $1', [id]);
+      await stopInApollo(svc, db, row);
     } catch {
       // Retried by syncUnsubscribes.
     }
@@ -90,21 +91,18 @@ export async function unsubscribe(svc: Services, db: Db, token: string | null | 
   return 'unsubscribed';
 }
 
-/** Blocklists anyone who unsubscribed while Instantly could not be reached. Returns how many were synced. */
+/** Stops the Apollo sequence of anyone who unsubscribed while Apollo could not be reached. Returns how many were synced. */
 export async function syncUnsubscribes(svc: Services, db: Db): Promise<number> {
-  if (!svc.keys.instantly) return 0;
+  if (!svc.keys.apollo) return 0;
   await ensureSchema(db);
-  const rows = await db.query<{ id: number | string; email: string }>(
-    "SELECT id, email FROM people WHERE unsubscribed_at IS NOT NULL AND NOT unsubscribe_blocked AND email <> '' LIMIT 50",
-  );
+  const rows = await db.query<Row>('SELECT id, apollo_contact_id, apollo_sequence_id FROM people WHERE unsubscribed_at IS NOT NULL AND NOT unsubscribe_blocked LIMIT 50');
   let synced = 0;
   for (const r of rows) {
     try {
-      await blockInInstantly(svc, r.email);
-      await db.query('UPDATE people SET unsubscribe_blocked = TRUE WHERE id = $1', [r.id]);
+      await stopInApollo(svc, db, r);
       synced++;
     } catch {
-      break; // Instantly is still unreachable: try again next time.
+      break; // Apollo is still unreachable: try again next time.
     }
   }
   return synced;

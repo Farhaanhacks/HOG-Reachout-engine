@@ -117,7 +117,7 @@ export default function LeadsPage() {
                       <td><CountryBadge geo={p.geo} match={p.geo_match} /></td>
                       <td>
                         {p.email ? <div>{p.email}</div> : null}
-                        <EmailBadge status={p.apollo_status} /> {p.instantly_status === 'added' && <span className="badge ok">In Instantly</span>}
+                        <EmailBadge status={p.apollo_status} /> {p.sequence_status === 'added' && <span className="badge ok">In Apollo sequence</span>}
                       </td>
                       <td className="small muted">{formatDate(p.first_seen)}</td>
                       <td><button className="link small" onClick={() => setOpenDraft(open ? '' : String(p.id))}>{open ? 'Hide email' : 'Email draft'}</button></td>
