@@ -2,11 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { EmailBadge } from '../../components/badges';
-import { api, formatDate, post } from '../../lib/client';
+import { api, formatDate, personalizeWaiting, post } from '../../lib/client';
 import type { Campaign, InstantlyLead } from '../../lib/instantly';
 import { CAMPAIGN_STATUS } from '../../lib/instantly';
 import type { OutreachStatus, PushSummary } from '../../lib/outreach';
-import type { PersonalizeSummary } from '../../lib/personalize';
 import type { SavedPerson } from '../../lib/store';
 
 type Overview = {
@@ -27,7 +26,6 @@ export default function OutreachPage() {
   const [data, setData] = useState<Overview | null>(null);
   const [campaignId, setCampaignId] = useState('');
   const [limit, setLimit] = useState(25);
-  const [personalizeCount, setPersonalizeCount] = useState(30);
   const [progress, setProgress] = useState('');
   const [preview, setPreview] = useState<Preview[] | null>(null);
   const [openRow, setOpenRow] = useState('');
@@ -36,7 +34,7 @@ export default function OutreachPage() {
   const [testResult, setTestResult] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const stop = useRef(false);
+  const autoStarted = useRef(false);
 
   const load = useCallback(async () => {
     const d = await api<Overview>('/api/outreach');
@@ -74,27 +72,22 @@ export default function OutreachPage() {
     setBusy(false);
   }
 
-  /** Personalizes in batches of 10 (each batch is one short request) until the count is reached or nobody is left. */
-  const doPersonalize = () =>
-    act(async () => {
-      stop.current = false;
-      const total = { done: 0, none: 0, failed: 0, searches: 0 };
-      let lastError = '';
-      while (total.done + total.none < personalizeCount && !stop.current) {
-        const d = await api<{ summary: PersonalizeSummary; status: OutreachStatus }>('/api/outreach', post({ action: 'personalize', limit: Math.min(10, personalizeCount - total.done - total.none) }));
-        total.done += d.summary.done;
-        total.none += d.summary.none;
-        total.failed += d.summary.failed;
-        total.searches += d.summary.searches;
-        if (d.summary.error) lastError = d.summary.error;
-        setProgress(`${total.done} personalized, ${total.none} held back (nothing specific found)${total.failed ? `, ${total.failed} failed` : ''}.`);
-        setData((prev) => (prev ? { ...prev, status: d.status } : prev));
-        if (d.summary.done + d.summary.none === 0) break; // nobody left, or every attempt failed
-      }
-      if (lastError && total.failed) setError(`Some leads could not be personalized: ${lastError}. They will be tried again next time.`);
-      setPreview(null);
-      await load();
-    });
+  /**
+   * Personalization is automatic: whenever this page opens with emails still waiting, it reads their news and writes
+   * their openers in the background (batches of 10), then refreshes the counts. No button to remember.
+   */
+  useEffect(() => {
+    if (!data || !data.aiConfigured || data.status.toPersonalize === 0 || autoStarted.current) return;
+    autoStarted.current = true;
+    setProgress(`Personalizing ${data.status.toPersonalize} emails from the news…`);
+    personalizeWaiting(data.status.toPersonalize, (done) => setProgress(`Personalizing from the news… ${done} of ${data.status.toPersonalize} done.`))
+      .then((r) => {
+        setProgress(`Personalized ${r.done} emails.${r.failed ? ` ${r.failed} could not be done right now (${r.error}); they are retried automatically.` : ''}`);
+        return load();
+      })
+      // Once per page visit: if some fail (say DeepSeek is down), they are retried on the next visit or just before sending.
+      .catch((e: Error) => setProgress(`Personalization paused: ${e.message}. It retries when this page is opened again.`));
+  }, [data, load]);
 
   const doPreview = () =>
     act(async () => {
@@ -139,9 +132,8 @@ export default function OutreachPage() {
       {error && <p className="alert" role="alert">{error}</p>}
 
       <div className="stats">
-        <div className="stat"><div className="n">{data?.status.toPersonalize ?? '—'}</div><div className="l">Waiting to be personalized</div></div>
+        <div className="stat"><div className="n">{data?.status.toPersonalize ?? '—'}</div><div className="l">Being personalized</div></div>
         <div className="stat"><div className="n">{data?.status.waiting ?? '—'}</div><div className="l">Personalized, ready to send</div></div>
-        <div className="stat"><div className="n">{data?.status.noOpener ?? '—'}</div><div className="l">Held back (nothing specific)</div></div>
         <div className="stat"><div className="n">{data?.status.sent ?? '—'}</div><div className="l">In Instantly</div></div>
         <div className="stat"><div className="n">{data?.status.unsubscribed ?? '—'}</div><div className="l">Unsubscribed</div></div>
         <div className="stat"><div className="n">{data ? `${data.status.sentToday}/${data.status.dailyLimit}` : '—'}</div><div className="l">Sent to Instantly today</div></div>
@@ -149,20 +141,11 @@ export default function OutreachPage() {
 
       <div className="grid-run">
         <section className="card">
-          <h2>1. Personalize</h2>
-          {data && !data.aiConfigured && <p className="warn-note">Add <code>DEEPSEEK_API_KEY</code> in Vercel to write personal openers.</p>}
-          <p className="muted small">For each person: a news search on them and their company, then DeepSeek writes one or two sentences using only what it found. Their name and email are never sent to DeepSeek. If nothing specific turns up, the person is held back for you to write a line by hand.</p>
-          <div className="row">
-            <label className="check">
-              Personalize the next
-              <input id="personalize-count" type="number" min={1} max={200} value={personalizeCount} onChange={(e) => setPersonalizeCount(Math.max(1, Math.min(200, Number(e.target.value) || 1)))} style={{ width: 90 }} />
-              people
-            </label>
-            <button className="primary" onClick={doPersonalize} disabled={busy || !data?.aiConfigured || !data?.status.toPersonalize}>{busy && progress ? 'Personalizing…' : 'Personalize'}</button>
-            {busy && <button className="danger" onClick={() => (stop.current = true)}>Stop</button>}
-          </div>
-          <p className="muted small">Uses about two Serper credits (news about the person, then their company) and one small DeepSeek request per person.</p>
-          {progress && <p className="note small" role="status">{progress}</p>}
+          <h2>1. Personalization (automatic)</h2>
+          {data && !data.aiConfigured && <p className="warn-note">Add <code>DEEPSEEK_API_KEY</code> in Vercel so every email can be personalized.</p>}
+          <p className="muted small">Every email is personalized automatically: right after Apollo finds the email, whenever this page opens, and again just before sending, so nothing plain ever goes out. Each person&apos;s news is searched (them at their company, then the company) and DeepSeek writes one or two sentences from what it finds. With no news, the line is written from their role and company. Their name and email are never sent to DeepSeek.</p>
+          {progress ? <p className="note small" role="status">{progress}</p> : data && data.status.toPersonalize === 0 ? <p className="note small">All {data.status.waiting} emails waiting to send are personalized.</p> : null}
+          <p className="faint small">About two Serper credits and one small DeepSeek request per person.</p>
         </section>
 
         <section className="card">

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RunBadge } from '../../components/badges';
-import { api, countryName, formatDate, post } from '../../lib/client';
+import { api, countryName, formatDate, personalizeWaiting, post } from '../../lib/client';
 import type { EnrichSummary } from '../../lib/enrich';
 import { SEGMENTS, segmentById } from '../../lib/icp';
 import type { Run } from '../../lib/run';
@@ -63,6 +63,16 @@ export default function RunPage() {
         r = d.run;
         setRun(r);
         say(`Apollo: ${d.summary.requested} looked up, ${d.summary.withEmail} emails ready, ${d.summary.credits} credits${d.summary.stopped ? `. ${d.summary.stopped}` : ''}`);
+        if (d.summary.withEmail > 0) {
+          // Every new email gets its personal opener from the news straight away.
+          say('Reading the news to personalize each email…');
+          try {
+            const p = await personalizeWaiting(d.summary.withEmail);
+            say(`Personalized ${p.done} emails${p.none ? `; ${p.none} had no specific news (write those on the Outreach page)` : ''}${p.failed ? `; ${p.failed} failed: ${p.error}` : ''}.`);
+          } catch (e) {
+            say(`Could not personalize: ${(e as Error).message}. Use Personalize on the Outreach page.`);
+          }
+        }
       }
       if (r.status === 'running') {
         r = (await api<{ run: Run }>(`/api/runs/${r.id}/finish`, post({ status: 'done' }))).run;

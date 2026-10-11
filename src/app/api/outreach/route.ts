@@ -3,7 +3,7 @@ import { checkPassword } from '../../../lib/auth';
 import { getDb } from '../../../lib/db';
 import { listCampaigns } from '../../../lib/instantly';
 import { heldBack, outreachDailyLimitFromEnv, outreachStatus, pendingOutreach, pushToInstantly, sendTest, toInstantlyLead } from '../../../lib/outreach';
-import { personalizeNext, setOpener } from '../../../lib/personalize';
+import { personalizeNext, personalizeOne, setOpener } from '../../../lib/personalize';
 import { keysFromEnv } from '../../../lib/services';
 import { listPeople } from '../../../lib/store';
 import { syncUnsubscribes } from '../../../lib/unsubscribe';
@@ -60,6 +60,10 @@ export async function POST(req: Request) {
   const svc = { fetch, keys: keysFromEnv() };
   try {
     const db = getDb();
+    if (body.action === 'personalize-one') {
+      if (!body.personId) return NextResponse.json({ error: 'Send a personId.' }, { status: 400 });
+      return NextResponse.json(await personalizeOne(svc, db, body.personId));
+    }
     if (body.action === 'personalize') {
       const summary = await personalizeNext(svc, db, Math.min(limit, 10));
       return NextResponse.json({ summary, status: await outreachStatus(db, outreachDailyLimitFromEnv()) });

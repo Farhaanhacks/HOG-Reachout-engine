@@ -1,5 +1,6 @@
 import { geoShort } from './geo';
 import { addLeads, type InstantlyLead } from './instantly';
+import { personalizeNext } from './personalize';
 import { draftEmail, unsubscribeLineHtml, unsubscribeLineText } from './pitch';
 import { TEST_ID, unsubscribeUrl } from './unsubscribe';
 import type { Services } from './services';
@@ -83,8 +84,8 @@ export async function outreachStatus(db: Db, dailyLimit = DEFAULT_OUTREACH_DAILY
   const unsent = `${READY_SQL} AND email <> '' AND instantly_status = ''`;
   const [p] = await db.query<{ waiting: number; to_personalize: number; no_opener: number; sent: number; skipped: number; unsubscribed: number }>(
     `SELECT count(*) FILTER (WHERE ${unsent} AND opener_status = 'done' AND opener <> '')::int AS waiting,
-            count(*) FILTER (WHERE ${unsent} AND opener_status = '')::int AS to_personalize,
-            count(*) FILTER (WHERE ${unsent} AND opener_status = 'none')::int AS no_opener,
+            count(*) FILTER (WHERE ${unsent} AND opener_status IN ('', 'none'))::int AS to_personalize,
+            0::int AS no_opener,
             count(*) FILTER (WHERE instantly_status = 'added')::int AS sent,
             count(*) FILTER (WHERE instantly_status = 'skipped')::int AS skipped,
             count(*) FILTER (WHERE unsubscribed_at IS NOT NULL)::int AS unsubscribed
@@ -135,6 +136,9 @@ export async function pushToInstantly(svc: Services, db: Db, opts: { campaignId:
   const room = dailyLimit - status.sentToday;
   const none: PushSummary = { requested: 0, added: 0, skipped: 0, invalid: 0, blocklisted: 0 };
   if (room <= 0) return { ...none, stopped: `Daily limit of ${dailyLimit} leads sent to Instantly reached` };
+  // Nobody unpersonalized is ever sent: anyone still waiting is personalized from the news right here first (the
+  // pages normally do this earlier, so this is the safety net).
+  if (svc.keys.deepseek && status.toPersonalize > 0) await personalizeNext(svc, db, Math.min(opts.limit, room, 20)).catch(() => undefined);
   const people = await pendingOutreach(db, Math.min(opts.limit, room));
   if (!people.length) return none;
 

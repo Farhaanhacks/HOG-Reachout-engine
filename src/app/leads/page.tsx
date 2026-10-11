@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { CountryBadge, EmailBadge, RankBadge, SizeBadge } from '../../components/badges';
-import { api, formatDate } from '../../lib/client';
+import { api, formatDate, post } from '../../lib/client';
 import { GEOS, GEO_LIST } from '../../lib/geo';
 import { draftEmail } from '../../lib/pitch';
 import type { SavedPerson } from '../../lib/store';
@@ -20,6 +20,28 @@ export default function LeadsPage() {
   const [people, setPeople] = useState<SavedPerson[] | null>(null);
   const [error, setError] = useState('');
   const [openDraft, setOpenDraft] = useState('');
+  const [personalizing, setPersonalizing] = useState('');
+
+  /** Researches one person's news and writes their opener, then shows the personalized draft. */
+  async function personalize(id: string) {
+    setPersonalizing(id);
+    setError('');
+    try {
+      const r = await api<{ status: string; opener: string; fact: string }>('/api/outreach', post({ action: 'personalize-one', personId: id }));
+      setPeople((list) => list?.map((x) => (String(x.id) === id ? { ...x, opener: r.opener, opener_fact: r.fact, opener_status: r.status } : x)) ?? list);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+    setPersonalizing('');
+  }
+
+  // Opening a draft that is not personalized yet personalizes it straight away: nobody has to press anything.
+  useEffect(() => {
+    const p = people?.find((x) => String(x.id) === openDraft);
+    if (p && p.opener_status !== 'done' && !personalizing) personalize(openDraft);
+    // Runs when a draft is opened; `people` changes after personalizing and must not trigger it again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openDraft]);
 
   const params = useMemo(() => {
     const p = new URLSearchParams();
@@ -104,6 +126,20 @@ export default function LeadsPage() {
                       <tr>
                         <td colSpan={7}>
                           <div className="draft">
+                            {p.opener_status === 'done' && p.opener ? (
+                              <p className="note small">Personalized{p.opener_fact ? ` from: ${p.opener_fact}` : ''}.</p>
+                            ) : (
+                              <p className="warn-note small">
+                                {personalizing === String(p.id) ? (
+                                  'Reading the news and personalizing this email…'
+                                ) : (
+                                  <>
+                                    Could not personalize this one yet.{' '}
+                                    <button className="link small" onClick={() => personalize(String(p.id))} disabled={!!personalizing}>Try again</button>
+                                  </>
+                                )}
+                              </p>
+                            )}
                             <div><span className="muted small">Subject</span> <b>{d.subject}</b></div>
                             <pre>{d.body}</pre>
                           </div>

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { EmailBadge } from '../../components/badges';
-import { api, post } from '../../lib/client';
+import { api, personalizeWaiting, post } from '../../lib/client';
 import type { EnrichStatus, EnrichSummary } from '../../lib/enrich';
 import type { SavedPerson } from '../../lib/store';
 
@@ -12,6 +12,7 @@ export default function EmailsPage() {
   const [preview, setPreview] = useState<SavedPerson[] | null>(null);
   const [done, setDone] = useState<SavedPerson[] | null>(null);
   const [summary, setSummary] = useState<EnrichSummary | null>(null);
+  const [personalized, setPersonalized] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -39,6 +40,7 @@ export default function EmailsPage() {
   const doPreview = () =>
     act(async () => {
       setSummary(null);
+      setPersonalized('');
       const d = await api<{ people: SavedPerson[]; status: EnrichStatus }>('/api/steps/9', post({ action: 'preview', limit }));
       setPreview(d.people);
       setStatus(d.status);
@@ -50,6 +52,16 @@ export default function EmailsPage() {
       setSummary(d.summary);
       setPreview(null);
       await refresh();
+      if (d.summary.withEmail > 0) {
+        // Every new email gets its personal opener from the news straight away.
+        setPersonalized('Reading the news to personalize each email…');
+        try {
+          const p = await personalizeWaiting(d.summary.withEmail, (done, none) => setPersonalized(`Personalizing… ${done} done${none ? `, ${none} with no specific news` : ''}.`));
+          setPersonalized(`Personalized ${p.done} emails from the news${p.none ? `; ${p.none} had nothing specific (write those on the Outreach page)` : ''}${p.failed ? `; ${p.failed} failed: ${p.error}` : ''}.`);
+        } catch (e) {
+          setPersonalized(`Could not personalize: ${(e as Error).message}. Use Personalize on the Outreach page.`);
+        }
+      }
     });
 
   const left = status ? status.dailyLimit - status.usedToday : 0;
@@ -86,6 +98,7 @@ export default function EmailsPage() {
         </div>
         <p className="muted small">Preview spends nothing. Getting emails spends about 1 Apollo credit per person found. {status ? `${Math.max(0, left)} lookups left today.` : ''}</p>
         {error && <p className="alert" role="alert">{error}</p>}
+        {personalized && <p className="note small" role="status">{personalized}</p>}
         {summary && (
           <p className={summary.stopped ? 'warn-note' : 'note'} role="status">
             Looked up {summary.requested}: {summary.withEmail} emails ready, {summary.credits} credits used.{summary.stopped ? ` Stopped: ${summary.stopped}` : ''}

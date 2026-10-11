@@ -2,7 +2,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { parseJsonObject } from '../src/lib/ai';
 import type { Person } from '../src/lib/linkedin';
-import { cleanOpener, factsFor, personalizeNext, redactName, setOpener } from '../src/lib/personalize';
+import { cleanOpener, factsFor, fallbackOpener, personalizeNext, personalizeOne, redactName, setOpener } from '../src/lib/personalize';
 import type { Services } from '../src/lib/services';
 import { savePeople, type Db } from '../src/lib/store';
 
@@ -74,14 +74,14 @@ describe('privacy', () => {
 });
 
 describe('personalizeNext', () => {
-  it('saves a usable opener, holds back a lead with nothing specific, and retries failures later', async () => {
+  it('saves a usable opener, writes one from role and company when nothing specific is found, and retries failures later', async () => {
     await seed([person('A One', 'Alpha'), person('B Two', 'Beta'), person('C Three', 'Gamma')]);
     const { svc, news } = fakes({ Alpha: 'Your Riyadh office opening this year caught our eye.', Beta: '', Gamma: 'fail' });
     const summary = await personalizeNext(svc, db, 10);
-    expect(summary).toMatchObject({ done: 1, none: 1, failed: 1, searches: 6 }); // two news searches each: the person at the company, then the company
+    expect(summary).toMatchObject({ done: 2, none: 0, failed: 1, searches: 6 }); // two news searches each: the person at the company, then the company
     expect(news).toEqual(expect.arrayContaining(['"Alpha"', '"Beta"', '"Gamma"']));
     expect(await row('Alpha')).toMatchObject({ opener: 'Your Riyadh office opening this year caught our eye.', opener_status: 'done', opener_fact: 'Riyadh office' });
-    expect(await row('Beta')).toMatchObject({ opener: '', opener_status: 'none' });
+    expect(await row('Beta')).toMatchObject({ opener: 'Leading Beta as CEO puts you among the leaders our readers want to hear from.', opener_status: 'done', opener_fact: 'role and company (no news found)' });
     expect(await row('Gamma')).toMatchObject({ opener_status: '' }); // tried again next time
 
     const again = await personalizeNext(fakes({ Gamma: 'Your growth at Gamma caught our eye.' }).svc, db, 10);
@@ -121,5 +121,36 @@ describe('facts and parsing', () => {
     expect(parseJsonObject('```json\n{"opener":"x"}\n```')).toEqual({ opener: 'x' });
     expect(parseJsonObject('Sure: {"opener":"y"} hope this helps')).toEqual({ opener: 'y' });
     expect(parseJsonObject('no json')).toBeNull();
+  });
+});
+
+describe('personalizeOne', () => {
+  it('personalizes one lead on demand, even without an email, and can redo it', async () => {
+    await savePeople(db, [person('Mihai Ionescu', 'Oves Enterprise')], 'ae', 'q');
+    const [p] = await db.query<{ id: number }>('SELECT id FROM people');
+    const { svc, news } = fakes({ 'Oves Enterprise': 'Your SkyLock drone interception system launched this year caught our eye.' });
+    expect(await personalizeOne(svc, db, p.id)).toEqual({ status: 'done', opener: 'Your SkyLock drone interception system launched this year caught our eye.', fact: 'Riyadh office' });
+    expect(news).toEqual(['"Mihai Ionescu" "Oves Enterprise"', '"Oves Enterprise"']);
+    expect(await row('Oves Enterprise')).toMatchObject({ opener_status: 'done' });
+  });
+
+  it('says when the lead does not exist', async () => {
+    await expect(personalizeOne(fakes({}).svc, db, 12345)).rejects.toThrow('Lead not found');
+  });
+});
+
+describe('fallbackOpener', () => {
+  it('uses only role and company', () => {
+    expect(fallbackOpener({ title: 'Founder & CEO', company: 'Oves Enterprise' })).toBe('Leading Oves Enterprise as Founder & CEO puts you among the leaders our readers want to hear from.');
+    expect(fallbackOpener({ title: '', company: 'Oves Enterprise' })).toBe('Your work at Oves Enterprise puts you among the leaders our readers want to hear from.');
+    expect(fallbackOpener({ title: '', company: '' })).toBe('Your leadership journey is the kind of story our readers want to hear.');
+  });
+
+  it('re-personalizes leads that were held back under the old rule', async () => {
+    await seed([person('A One', 'Alpha')]);
+    await db.query("UPDATE people SET opener_status = 'none'");
+    const { svc } = fakes({ Alpha: 'Your Riyadh office opening this year caught our eye.' });
+    expect(await personalizeNext(svc, db, 10)).toMatchObject({ done: 1 });
+    expect(await row('Alpha')).toMatchObject({ opener_status: 'done' });
   });
 });
