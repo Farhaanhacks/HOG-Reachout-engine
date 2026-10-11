@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { EmailBadge } from '../../components/badges';
+import { EmailBadge, PersonName } from '../../components/badges';
 import { api, personalizeWaiting, post } from '../../lib/client';
 import type { EnrichStatus, EnrichSummary } from '../../lib/enrich';
 import type { SavedPerson } from '../../lib/store';
@@ -110,7 +110,7 @@ export default function EmailsPage() {
               <thead><tr><th>Would look up</th><th>Title</th><th>Company</th></tr></thead>
               <tbody>
                 {preview.map((p) => (
-                  <tr key={String(p.id)}><td><a href={p.linkedin_url} target="_blank" rel="noreferrer">{p.name}</a></td><td>{p.title || '—'}</td><td>{p.company || '—'}</td></tr>
+                  <tr key={String(p.id)}><td><PersonName p={p} /></td><td>{p.title || '—'}</td><td>{p.company || '—'}</td></tr>
                 ))}
               </tbody>
             </table>
@@ -128,7 +128,7 @@ export default function EmailsPage() {
             <tbody>
               {done?.map((p) => (
                 <tr key={String(p.id)}>
-                  <td><a href={p.linkedin_url} target="_blank" rel="noreferrer">{p.name}</a></td>
+                  <td><PersonName p={p} /></td>
                   <td>{p.company || '—'}</td>
                   <td>{p.email || <span className="muted">—</span>}</td>
                   <td><EmailBadge status={p.apollo_status} /></td>

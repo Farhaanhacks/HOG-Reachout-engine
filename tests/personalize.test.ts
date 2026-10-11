@@ -51,7 +51,7 @@ const person = (name: string, company: string, snippet = ''): Person => ({
 
 async function seed(people: Person[]) {
   await savePeople(db, people, 'ae', 'q');
-  await db.query("UPDATE people SET email = lower(replace(name, ' ', '')) || '@example.com', apollo_status = 'matched', company_size = 'fit', apollo_checked_at = now()");
+  await db.query("UPDATE people SET email = lower(replace(name, ' ', '')) || '@example.com', apollo_status = 'matched', email_status = 'verified', company_size = 'fit', apollo_checked_at = now()");
 }
 const row = async (company: string) =>
   (await db.query<{ opener: string; opener_status: string; opener_fact: string }>('SELECT opener, opener_status, opener_fact FROM people WHERE company = $1', [company]))[0];

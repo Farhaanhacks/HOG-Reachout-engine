@@ -1,49 +1,54 @@
 import { NextResponse } from 'next/server';
-import { findCustomFields, listEmailAccounts, listSequences, missingFields, type EmailAccount, type Sequence } from '../../../lib/apollo-sequences';
+import { findCustomFields, listSequences, missingFields, type Sequence } from '../../../lib/apollo-sequences';
 import { checkPassword } from '../../../lib/auth';
 import { getDb } from '../../../lib/db';
-import { fullEmail, heldBack, outreachDailyLimitFromEnv, outreachStatus, pendingOutreach, pushToApollo, sendTest } from '../../../lib/outreach';
+import { syncMailboxes, type MailboxState } from '../../../lib/deliverability';
+import { fullEmail, heldBack, outreachDailyLimitFromEnv, outreachStatus, pendingOutreach, pushToApollo, sendTest, sendingRoom } from '../../../lib/outreach';
 import { personalizeNext, personalizeOne, setOpener } from '../../../lib/personalize';
 import { CUSTOM_FIELDS, sequenceTemplate } from '../../../lib/pitch';
 import { keysFromEnv } from '../../../lib/services';
+import { getSettings } from '../../../lib/settings';
 import { listPeople } from '../../../lib/store';
 import { syncUnsubscribes } from '../../../lib/unsubscribe';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-/** Status, the Apollo sequences, mailboxes and custom-field check, the template to paste, and who was sent recently. Spends nothing. */
+/** Status, the Apollo sequences, the inboxes and today's room, the custom-field check, the template, and who was sent recently. Spends nothing. */
 export async function GET(req: Request) {
   const denied = checkPassword(req);
   if (denied) return denied;
   const svc = { fetch, keys: keysFromEnv() };
   try {
     const db = getDb();
+    const settings = await getSettings(db);
     let sequences: Sequence[] = [];
-    let emailAccounts: EmailAccount[] = [];
     let missing: string[] = Object.values(CUSTOM_FIELDS);
     let apolloError = '';
     if (svc.keys.apollo) {
       try {
-        [sequences, emailAccounts, missing] = await Promise.all([listSequences(svc), listEmailAccounts(svc), findCustomFields(svc).then(missingFields)]);
+        [sequences, missing] = await Promise.all([listSequences(svc), findCustomFields(svc).then(missingFields), syncMailboxes(svc, db)]);
       } catch (e) {
         apolloError = (e as Error).message;
       }
       // Anyone who unsubscribed while Apollo was unreachable has their sequence stopped now.
       await syncUnsubscribes(svc, db).catch(() => 0);
     }
+    const dailyLimit = outreachDailyLimitFromEnv();
+    const { room, inboxes } = await sendingRoom(db, dailyLimit, settings.emailsPerPerson);
     const sent = (await listPeople(db, { limit: 1000 })).filter((p) => p.sequence_status).slice(0, 100);
     return NextResponse.json({
       configured: !!svc.keys.apollo,
       aiConfigured: !!svc.keys.deepseek,
       defaultSequenceId: process.env.APOLLO_SEQUENCE_ID ?? '',
-      defaultEmailAccountId: process.env.APOLLO_EMAIL_ACCOUNT_ID ?? '',
       sequences,
-      emailAccounts,
+      inboxes: inboxes.map((s: MailboxState) => ({ id: s.id, email: s.email, domain: s.domain, usable: s.usable, room: s.room, newToday: s.newToday, addedToday: s.addedToday, paused: s.paused_reason })),
+      room,
+      emailsPerPerson: settings.emailsPerPerson,
       missingFields: missing,
       template: sequenceTemplate(),
       apolloError,
-      status: await outreachStatus(db, outreachDailyLimitFromEnv()),
+      status: await outreachStatus(db, dailyLimit),
       held: await heldBack(db),
       sent,
     });
@@ -57,8 +62,8 @@ export async function GET(req: Request) {
  * action "personalize-one": personalizes one person { personId }.
  * action "opener": saves an opener written or edited by the team { personId, opener }.
  * action "preview": who would be sent next, with their full email. Spends nothing.
- * action "push" with confirm true: adds up to `limit` personalized people to the sequence { sequenceId, emailAccountId }.
- * action "test": one real personalized email to a test address the team owns { sequenceId, emailAccountId, testEmail }.
+ * action "push" with confirm true: adds up to `limit` personalized people to the sequence { sequenceId }, rotating inboxes.
+ * action "test": one real personalized email to a test address the team owns { sequenceId, testEmail, emailAccountId? }.
  */
 export async function POST(req: Request) {
   const denied = checkPassword(req);
@@ -91,24 +96,20 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, status: await outreachStatus(db, outreachDailyLimitFromEnv()) });
     }
     if (body.action === 'preview') {
+      const { editions } = await getSettings(db);
       const people = await pendingOutreach(db, limit);
-      return NextResponse.json({ people: people.map((p) => ({ ...p, preview: fullEmail(p) })) });
+      return NextResponse.json({ people: people.map((p) => ({ ...p, preview: fullEmail(p, { editions }) })) });
     }
     if (body.action === 'push') {
       if (body.confirm !== true) return NextResponse.json({ error: 'Adding people to a sequence starts real emails: send confirm true.' }, { status: 400 });
-      const summary = await pushToApollo(svc, db, {
-        sequenceId: String(body.sequenceId ?? ''),
-        emailAccountId: String(body.emailAccountId ?? ''),
-        limit,
-        dailyLimit: outreachDailyLimitFromEnv(),
-      });
+      const summary = await pushToApollo(svc, db, { sequenceId: String(body.sequenceId ?? ''), limit, dailyLimit: outreachDailyLimitFromEnv() });
       return NextResponse.json({ summary, status: await outreachStatus(db, outreachDailyLimitFromEnv()) });
     }
     if (body.action === 'test') {
       return NextResponse.json(
         await sendTest(svc, db, {
           sequenceId: String(body.sequenceId ?? ''),
-          emailAccountId: String(body.emailAccountId ?? ''),
+          emailAccountId: body.emailAccountId || undefined,
           testEmail: String(body.testEmail ?? '').trim(),
           personId: body.personId || undefined,
         }),

@@ -3,7 +3,7 @@ import type { CompanyFacts } from './size';
 import { getJson } from './services';
 
 /** What we know about a person, used to ask Apollo who they are. */
-export type ApolloInput = { linkedin?: string; name?: string; company?: string; domain?: string };
+export type ApolloInput = { id?: string; linkedin?: string; name?: string; company?: string; domain?: string };
 
 export type ApolloMatch = {
   /** '' when Apollo found the person but has no email. */
@@ -15,11 +15,26 @@ export type ApolloMatch = {
   title: string;
   company: string;
   linkedin: string;
+  /** Apollo's id for the person. */
+  id: string;
+  name: string;
+  country: string;
+  city: string;
+  /** The company's website, domain and industry ("hospital & health care"), when Apollo knows them. */
+  website: string;
+  domain: string;
+  industry: string;
   /** Size facts about the person's company, when Apollo returned its organization. */
   org?: CompanyFacts;
 };
 
 type ApolloPerson = {
+  id?: string | null;
+  name?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  country?: string | null;
+  city?: string | null;
   email?: string | null;
   email_status?: string | null;
   match_confidence?: string | null;
@@ -27,6 +42,9 @@ type ApolloPerson = {
   linkedin_url?: string | null;
   organization?: {
     name?: string | null;
+    website_url?: string | null;
+    primary_domain?: string | null;
+    industry?: string | null;
     estimated_num_employees?: number | string | null;
     annual_revenue?: number | string | null;
     total_funding?: number | string | null;
@@ -55,6 +73,7 @@ export function splitFullName(name: string): { first_name?: string; last_name?: 
 /** One entry of Apollo's `details` array. Only identifying fields are sent, never reveal or waterfall options (those cost extra credits). */
 export function toDetail(input: ApolloInput): Record<string, string> {
   const detail: Record<string, string> = {};
+  if (input.id) detail.id = input.id;
   if (input.linkedin) detail.linkedin_url = input.linkedin;
   Object.assign(detail, input.name ? splitFullName(input.name) : {});
   if (input.company) detail.organization_name = input.company;
@@ -77,6 +96,13 @@ export function parseMatch(p: ApolloPerson | null | undefined): ApolloMatch | nu
     title: p.title ?? '',
     company: p.organization?.name ?? '',
     linkedin: p.linkedin_url ?? '',
+    id: p.id ?? '',
+    name: (p.name ?? [p.first_name, p.last_name].filter(Boolean).join(' ')).trim(),
+    country: p.country ?? '',
+    city: p.city ?? '',
+    website: p.organization?.website_url ?? '',
+    domain: p.organization?.primary_domain ?? '',
+    industry: p.organization?.industry ?? '',
     org: p.organization
       ? {
           employees: num(p.organization.estimated_num_employees),

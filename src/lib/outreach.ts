@@ -1,13 +1,19 @@
 import { addToSequence, createContact, findCustomFields, missingFields, skipReason, type ApolloContactInput, type FieldIds } from './apollo-sequences';
+import { allocate, autoPause, mailboxStates, syncMailboxes, type MailboxState } from './deliverability';
 import { fallbackOpener, personalizeNext } from './personalize';
 import { draftEmail, unsubscribeLineText } from './pitch';
-import type { Services } from './services';
-import { READY_SQL, ensureSchema, type Db, type SavedPerson } from './store';
+import { mapLimit, type Services } from './services';
+import { getSettings } from './settings';
+import { PERSON_COLUMNS, READY_SQL, ensureSchema, type Db, type SavedPerson } from './store';
+import { editionFor, type Edition } from './targeting';
+import { syncIfStale } from './tracking';
 import { TEST_ID, unsubscribeUrl } from './unsubscribe';
 
 export const DEFAULT_OUTREACH_DAILY_LIMIT = 500;
+/** People added per click; "Send all ready" repeats it. */
+export const BATCH = 25;
 
-/** The most people added to Apollo sequences per day: OUTREACH_DAILY_LIMIT, or 500. Apollo itself paces the emails per mailbox. */
+/** The most people added to Apollo sequences per day across all inboxes: OUTREACH_DAILY_LIMIT, or 500. */
 export function outreachDailyLimitFromEnv(): number {
   return Math.max(1, Number(process.env.OUTREACH_DAILY_LIMIT) || DEFAULT_OUTREACH_DAILY_LIMIT);
 }
@@ -15,36 +21,45 @@ export function outreachDailyLimitFromEnv(): number {
 /** The label every contact the engine creates in Apollo gets, so the team can find them there. */
 export const APOLLO_LABEL = 'Humans of Globe lead engine';
 
-type ContactSource = Pick<SavedPerson, 'id' | 'name' | 'title' | 'company' | 'email' | 'opener'>;
+type ContactSource = Pick<SavedPerson, 'id' | 'name' | 'title' | 'company' | 'email' | 'opener'> & { industry?: string; segment?: string };
 
-/** The three personal parts of a person's email, as they go into Apollo's custom fields. */
-export function emailParts(p: ContactSource, opts: { unsubscribeId?: number | string } = {}): { subject: string; opener: string; unsubscribe: string } {
+/** The edition a lead is pitched for: from their industry, by the edition table. */
+function editionOf(p: ContactSource, editions?: Edition[]): Edition {
+  return editionFor(p.industry, editions);
+}
+
+/** The personal parts of a person's email, as they go into Apollo's custom fields. */
+export function emailParts(p: ContactSource, opts: { unsubscribeId?: number | string; editions?: Edition[] } = {}) {
   const d = draftEmail(p);
+  const e = editionOf(p, opts.editions);
   return {
     subject: d.subject,
     opener: p.opener?.trim() || fallbackOpener(p),
     unsubscribe: unsubscribeUrl(opts.unsubscribeId ?? p.id),
+    edition: e.edition,
+    industry: e.industryLine,
   };
 }
 
 /** The full email a person will receive, as the sequence template renders it. For previews. */
-export function fullEmail(p: ContactSource, opts: { unsubscribeId?: number | string } = {}): { subject: string; body: string } {
+export function fullEmail(p: ContactSource, opts: { unsubscribeId?: number | string; editions?: Edition[] } = {}): { subject: string; body: string } {
   const parts = emailParts(p, opts);
-  const d = draftEmail({ ...p, opener: parts.opener });
+  const d = draftEmail({ ...p, opener: parts.opener, edition: parts.edition, industryLine: parts.industry });
   return { subject: parts.subject, body: `${d.body}\n\n${unsubscribeLineText(parts.unsubscribe)}` };
 }
 
-/** A saved person as an Apollo contact, with their personal subject, opener and unsubscribe link in the custom fields. */
-export function toApolloContact(p: ContactSource, fields: FieldIds, opts: { unsubscribeId?: number | string; organizationName?: string } = {}): ApolloContactInput {
+/** A saved person as an Apollo contact, with their personal parts in the custom fields. */
+export function toApolloContact(p: ContactSource, fields: FieldIds, opts: { unsubscribeId?: number | string; organizationName?: string; editions?: Edition[] } = {}): ApolloContactInput {
   const d = draftEmail(p);
   const parts = emailParts(p, opts);
   const words = p.name.trim().split(/\s+/).filter(Boolean);
   const at = words.findIndex((w) => w.toLowerCase() === d.firstName.toLowerCase());
   const lastName = at >= 0 ? words.slice(at + 1).join(' ') : words.slice(1).join(' ');
   const custom: Record<string, string> = {};
-  if (fields.subject) custom[fields.subject] = parts.subject;
-  if (fields.opener) custom[fields.opener] = parts.opener;
-  if (fields.unsubscribe) custom[fields.unsubscribe] = parts.unsubscribe;
+  for (const k of Object.keys(parts) as (keyof typeof parts)[]) {
+    const id = fields[k];
+    if (id) custom[id] = parts[k];
+  }
   const contact: ApolloContactInput = { email: p.email, label_names: [APOLLO_LABEL], typed_custom_fields: custom };
   if (d.firstName !== 'there') contact.first_name = d.firstName;
   if (lastName) contact.last_name = lastName;
@@ -62,19 +77,15 @@ async function requireFields(svc: Services): Promise<FieldIds> {
   return fields;
 }
 
-const COLUMNS = `id, linkedin_url, name, title, company, location, geo, geo_match, labels, is_target, inferred, status, seen_count, first_seen, last_seen,
-  email, email_status, apollo_status, apollo_confidence, apollo_tier, rank, company_employees, company_size, sequence_status, sequence_note, sequenced_at,
-  opener, opener_fact, opener_status`;
-
 /**
- * Who goes to Apollo next: people with an email ready and a personal opener, not sent yet; main people first, then in
- * the order they got their email.
+ * Who goes to Apollo next: people who can be emailed (verified email, target title, not suppressed or unsubscribed) with
+ * a personal opener, not sent yet; main people first, then in the order they were found.
  */
 export async function pendingOutreach(db: Db, limit: number): Promise<SavedPerson[]> {
   await ensureSchema(db);
   return db.query<SavedPerson>(
-    `SELECT ${COLUMNS} FROM people
-     WHERE ${READY_SQL} AND email <> '' AND sequence_status = '' AND opener_status = 'done' AND opener <> ''
+    `SELECT ${PERSON_COLUMNS} FROM people
+     WHERE ${READY_SQL} AND sequence_status = '' AND opener_status = 'done' AND opener <> ''
      ORDER BY COALESCE(rank, 3) ASC, apollo_checked_at ASC NULLS LAST, id ASC LIMIT $1`,
     [Math.max(1, Math.min(limit, 1000))],
   );
@@ -83,24 +94,30 @@ export async function pendingOutreach(db: Db, limit: number): Promise<SavedPerso
 export type OutreachStatus = {
   /** Personalized and ready to send. */
   waiting: number;
-  /** Email ready but not personalized yet (it happens automatically). */
+  /** Ready to send but not personalized yet (it happens automatically). */
   toPersonalize: number;
   sent: number;
   skipped: number;
   unsubscribed: number;
+  /** Leads with an email that is not verified, or a title that is not a target: never sent. */
+  notSendable: number;
+  /** Leads the suppression list blocks. */
+  suppressed: number;
   sentToday: number;
   dailyLimit: number;
 };
 
 export async function outreachStatus(db: Db, dailyLimit = DEFAULT_OUTREACH_DAILY_LIMIT): Promise<OutreachStatus> {
   await ensureSchema(db);
-  const unsent = `${READY_SQL} AND email <> '' AND sequence_status = ''`;
-  const [p] = await db.query<{ waiting: number; to_personalize: number; sent: number; skipped: number; unsubscribed: number }>(
+  const unsent = `${READY_SQL} AND sequence_status = ''`;
+  const [p] = await db.query<{ waiting: number; to_personalize: number; sent: number; skipped: number; unsubscribed: number; not_sendable: number; suppressed: number }>(
     `SELECT count(*) FILTER (WHERE ${unsent} AND opener_status = 'done' AND opener <> '')::int AS waiting,
             count(*) FILTER (WHERE ${unsent} AND opener_status IN ('', 'none'))::int AS to_personalize,
             count(*) FILTER (WHERE sequence_status = 'added')::int AS sent,
             count(*) FILTER (WHERE sequence_status = 'skipped')::int AS skipped,
-            count(*) FILTER (WHERE unsubscribed_at IS NOT NULL)::int AS unsubscribed
+            count(*) FILTER (WHERE unsubscribed_at IS NOT NULL)::int AS unsubscribed,
+            count(*) FILTER (WHERE email <> '' AND (email_status <> 'verified' OR icp_fit = FALSE))::int AS not_sendable,
+            count(*) FILTER (WHERE email <> '' AND suppressed_reason <> '')::int AS suppressed
      FROM people`,
   );
   const [t] = await db.query<{ n: number }>(`SELECT coalesce(sum(requested), 0)::int AS n FROM outreach_log WHERE ran_at >= date_trunc('day', now())`);
@@ -110,6 +127,8 @@ export async function outreachStatus(db: Db, dailyLimit = DEFAULT_OUTREACH_DAILY
     sent: p?.sent ?? 0,
     skipped: p?.skipped ?? 0,
     unsubscribed: p?.unsubscribed ?? 0,
+    notSendable: p?.not_sendable ?? 0,
+    suppressed: p?.suppressed ?? 0,
     sentToday: t?.n ?? 0,
     dailyLimit,
   };
@@ -124,64 +143,99 @@ export type PushSummary = {
   failed: number;
   /** Apollo's reasons for declining, with counts. */
   reasons: Record<string, number>;
+  /** How many went to each inbox. */
+  byInbox: Record<string, number>;
+  /** Inboxes paused just now for bounces or spam blocks. */
+  paused: { email: string; reason: string }[];
   error?: string;
   stopped?: string;
 };
 
-/**
- * Sends the next people with a personalized email ready into an Apollo sequence, up to the daily cap: each becomes an
- * Apollo contact (their subject, opener and unsubscribe link in custom fields), then all are added to the sequence,
- * sending from the chosen mailbox. Anyone not yet personalized is personalized first, so nothing plain is ever sent.
- */
-export async function pushToApollo(svc: Services, db: Db, opts: { sequenceId: string; emailAccountId: string; limit: number; dailyLimit?: number }): Promise<PushSummary> {
-  if (!opts.sequenceId) throw new Error('Choose an Apollo sequence first.');
-  if (!opts.emailAccountId) throw new Error('Choose the mailbox to send from first.');
-  const fields = await requireFields(svc);
-  const dailyLimit = opts.dailyLimit ?? DEFAULT_OUTREACH_DAILY_LIMIT;
+/** Room left today: the overall daily cap, and each inbox's own (warm-up) limit. */
+export async function sendingRoom(db: Db, dailyLimit: number, emailsPerPerson: number): Promise<{ room: number; inboxes: MailboxState[] }> {
   const status = await outreachStatus(db, dailyLimit);
-  const room = dailyLimit - status.sentToday;
-  const summary: PushSummary = { requested: 0, added: 0, skipped: 0, failed: 0, reasons: {} };
-  if (room <= 0) return { ...summary, stopped: `Daily limit of ${dailyLimit} people added to Apollo reached` };
+  const inboxes = await mailboxStates(db, emailsPerPerson);
+  const inboxRoom = inboxes.reduce((n, s) => n + s.room, 0);
+  return { room: Math.max(0, Math.min(dailyLimit - status.sentToday, inboxRoom)), inboxes };
+}
+
+/**
+ * Sends the next people with a personalized email ready into an Apollo sequence. First the inbox list is refreshed from
+ * Apollo and, if the last check is over half an hour old, bounces and spam blocks are read and any inbox over the limits
+ * is paused. Then each person is created as an Apollo contact (their personal parts in custom fields) and given to an
+ * inbox: the inboxes take turns across both domains, each within its warm-up limit for today.
+ */
+export async function pushToApollo(svc: Services, db: Db, opts: { sequenceId: string; limit: number; dailyLimit?: number }): Promise<PushSummary> {
+  if (!opts.sequenceId) throw new Error('Choose an Apollo sequence first.');
+  const fields = await requireFields(svc);
+  const settings = await getSettings(db);
+  const dailyLimit = opts.dailyLimit ?? DEFAULT_OUTREACH_DAILY_LIMIT;
+  const summary: PushSummary = { requested: 0, added: 0, skipped: 0, failed: 0, reasons: {}, byInbox: {}, paused: [] };
+
+  await syncMailboxes(svc, db);
+  await syncIfStale(svc, db, 30 * 60_000, 15_000).catch(() => null);
+  summary.paused = await autoPause(db, settings.emailsPerPerson);
+
+  const { room, inboxes } = await sendingRoom(db, dailyLimit, settings.emailsPerPerson);
+  if (!inboxes.some((s) => s.usable)) return { ...summary, stopped: 'No inbox can send: connect inboxes in Apollo, or resume a paused one on the Deliverability page' };
+  if (room <= 0) return { ...summary, stopped: "Today's sending limit is used up across all inboxes (their warm-up limits and the daily cap). More can go tomorrow" };
   // Safety net: the pages normally personalize earlier.
-  if (svc.keys.deepseek && status.toPersonalize > 0) await personalizeNext(svc, db, Math.min(opts.limit, room, 20)).catch(() => undefined);
-  const people = await pendingOutreach(db, Math.min(opts.limit, room, 50));
+  const status = await outreachStatus(db, dailyLimit);
+  if (svc.keys.deepseek && status.toPersonalize > 0) await personalizeNext(svc, db, Math.min(opts.limit, room, 10)).catch(() => undefined);
+  const people = await pendingOutreach(db, Math.min(opts.limit, room, BATCH));
   if (!people.length) return summary;
 
-  const contactOf = new Map<string, SavedPerson>();
-  for (const p of people) {
+  const contacts = await mapLimit(people, 4, async (p) => {
     try {
-      const contactId = await createContact(svc, toApolloContact(p, fields));
-      contactOf.set(contactId, p);
+      const contactId = await createContact(svc, toApolloContact(p, fields, { editions: settings.editions }));
       await db.query('UPDATE people SET apollo_contact_id = $2 WHERE id = $1', [p.id, contactId]);
+      return { p, contactId };
     } catch (e) {
       summary.failed++;
       summary.error = (e as Error).message;
+      return null;
     }
-  }
-  if (!contactOf.size) return summary;
+  });
+  const created = contacts.filter((c): c is { p: SavedPerson; contactId: string } => !!c);
+  if (!created.length) return summary;
 
-  // If this fails, the contacts exist in Apollo but nobody is marked, so the same people go next time (Apollo matches
-  // them by email, so no duplicates are created).
-  const res = await addToSequence(svc, opts.sequenceId, [...contactOf.keys()], opts.emailAccountId);
-  const added = new Set(res.added);
-  for (const [contactId, p] of contactOf) {
-    const reason = res.skipped[contactId];
-    const result = reason ? 'skipped' : added.has(contactId) ? 'added' : 'skipped';
-    if (result === 'added') summary.added++;
-    else {
-      summary.skipped++;
-      const why = skipReason(reason ?? 'not added');
-      summary.reasons[why] = (summary.reasons[why] ?? 0) + 1;
+  const inboxFor = allocate(inboxes, created.length);
+  const groups = new Map<string, { p: SavedPerson; contactId: string }[]>();
+  created.slice(0, inboxFor.length).forEach((c, i) => groups.set(inboxFor[i], [...(groups.get(inboxFor[i]) ?? []), c]));
+  const emailOf = new Map(inboxes.map((s) => [s.id, s.email]));
+
+  for (const [inbox, list] of groups) {
+    let res: Awaited<ReturnType<typeof addToSequence>>;
+    try {
+      res = await addToSequence(svc, opts.sequenceId, list.map((c) => c.contactId), inbox);
+    } catch (e) {
+      // The contacts exist in Apollo but nobody is marked, so the same people go next time (Apollo matches them by email).
+      summary.failed += list.length;
+      summary.error = (e as Error).message;
+      continue;
     }
-    await db.query('UPDATE people SET sequence_status = $2, apollo_sequence_id = $3, sequence_note = $4, sequenced_at = now() WHERE id = $1', [
-      p.id,
-      result,
-      opts.sequenceId,
-      result === 'added' ? '' : skipReason(reason ?? 'not added'),
-    ]);
+    const added = new Set(res.added);
+    for (const { p, contactId } of list) {
+      const reason = res.skipped[contactId];
+      const ok = !reason && added.has(contactId);
+      if (ok) {
+        summary.added++;
+        summary.byInbox[emailOf.get(inbox) ?? inbox] = (summary.byInbox[emailOf.get(inbox) ?? inbox] ?? 0) + 1;
+      } else {
+        summary.skipped++;
+        const why = skipReason(reason ?? 'not added');
+        summary.reasons[why] = (summary.reasons[why] ?? 0) + 1;
+      }
+      await db.query(
+        `UPDATE people SET sequence_status = $2, apollo_sequence_id = $3, sequence_note = $4, sequenced_at = now(), sent_from = $5, sent_from_email = $6 WHERE id = $1`,
+        [p.id, ok ? 'added' : 'skipped', opts.sequenceId, ok ? '' : skipReason(reason ?? 'not added'), ok ? inbox : '', ok ? (emailOf.get(inbox) ?? '') : ''],
+      );
+    }
+    summary.requested += list.length;
   }
-  summary.requested = contactOf.size;
-  await db.query('INSERT INTO outreach_log (campaign_id, requested, added, skipped) VALUES ($1, $2, $3, $4)', [opts.sequenceId, summary.requested, summary.added, summary.skipped]);
+  if (summary.requested) {
+    await db.query('INSERT INTO outreach_log (campaign_id, requested, added, skipped) VALUES ($1, $2, $3, $4)', [opts.sequenceId, summary.added, summary.added, summary.skipped]);
+  }
   return summary;
 }
 
@@ -189,27 +243,36 @@ export async function pushToApollo(svc: Services, db: Db, opts: { sequenceId: st
 export async function heldBack(db: Db, limit = 50): Promise<SavedPerson[]> {
   await ensureSchema(db);
   return db.query<SavedPerson>(
-    `SELECT ${COLUMNS} FROM people WHERE ${READY_SQL} AND email <> '' AND sequence_status = '' AND opener_status = 'none'
+    `SELECT ${PERSON_COLUMNS} FROM people WHERE ${READY_SQL} AND sequence_status = '' AND opener_status = 'none'
      ORDER BY COALESCE(rank, 3) ASC, id ASC LIMIT $1`,
     [Math.max(1, Math.min(limit, 200))],
   );
 }
 
 /**
- * A test: one saved person's real personalized email, sent through the sequence to an address the team owns. The test
- * contact gets a separate company name so Apollo never treats the real person's company as already in the sequence,
- * and an unsubscribe link that unsubscribes nobody. The real person is not contacted or marked.
+ * A test: one saved person's real personalized email, sent through the sequence to an address the team owns, from the
+ * chosen inbox (or the first one that can send). The test contact gets a separate company name so Apollo never treats
+ * the real person's company as already in the sequence, and an unsubscribe link that unsubscribes nobody. The real
+ * person is not contacted or marked.
  */
-export async function sendTest(svc: Services, db: Db, opts: { sequenceId: string; emailAccountId: string; testEmail: string; personId?: number | string }): Promise<{ added: boolean; reason?: string }> {
+export async function sendTest(svc: Services, db: Db, opts: { sequenceId: string; emailAccountId?: string; testEmail: string; personId?: number | string }): Promise<{ added: boolean; reason?: string; from: string }> {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(opts.testEmail)) throw new Error('Enter a valid test email address.');
+  if (!opts.sequenceId) throw new Error('Choose an Apollo sequence first.');
   const fields = await requireFields(svc);
-  await ensureSchema(db);
+  const settings = await getSettings(db);
+  await syncMailboxes(svc, db);
+  const inboxes = await mailboxStates(db, settings.emailsPerPerson);
+  const inbox = inboxes.find((s) => s.id === opts.emailAccountId) ?? inboxes.find((s) => s.usable) ?? inboxes.find((s) => s.apollo_active);
+  if (!inbox) throw new Error('No inbox is connected in Apollo yet. Connect one under Settings, Mailboxes.');
   const [person] = opts.personId
-    ? await db.query<SavedPerson>(`SELECT ${COLUMNS} FROM people WHERE id = $1`, [opts.personId])
-    : await db.query<SavedPerson>(`SELECT ${COLUMNS} FROM people WHERE ${READY_SQL} ORDER BY (opener_status = 'done') DESC, COALESCE(rank, 3), id LIMIT 1`);
+    ? await db.query<SavedPerson>(`SELECT ${PERSON_COLUMNS} FROM people WHERE id = $1`, [opts.personId])
+    : await db.query<SavedPerson>(`SELECT ${PERSON_COLUMNS} FROM people WHERE ${READY_SQL} ORDER BY (opener_status = 'done') DESC, COALESCE(rank, 3), id LIMIT 1`);
   const sample: ContactSource = person ?? { id: TEST_ID, name: 'Test Person', title: 'CEO', company: 'Example Company', email: '', opener: '' };
-  const contactId = await createContact(svc, toApolloContact({ ...sample, email: opts.testEmail }, fields, { unsubscribeId: TEST_ID, organizationName: 'Humans of Globe (test)' }));
-  const res = await addToSequence(svc, opts.sequenceId, [contactId], opts.emailAccountId);
+  const contactId = await createContact(
+    svc,
+    toApolloContact({ ...sample, email: opts.testEmail }, fields, { unsubscribeId: TEST_ID, organizationName: 'Humans of Globe (test)', editions: settings.editions }),
+  );
+  const res = await addToSequence(svc, opts.sequenceId, [contactId], inbox.id, { allowUnverified: true });
   const reason = res.skipped[contactId];
-  return { added: !reason && res.added.includes(contactId), reason: reason ? skipReason(reason) : undefined };
+  return { added: !reason && res.added.includes(contactId), reason: reason ? skipReason(reason) : undefined, from: inbox.email };
 }

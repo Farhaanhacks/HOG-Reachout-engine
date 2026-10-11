@@ -52,16 +52,18 @@ export async function listEmailAccounts(svc: Services): Promise<EmailAccount[]> 
   return (res.email_accounts ?? []).map((a) => ({ id: String(a.id), email: String(a.email ?? ''), active: a.active !== false, isDefault: !!a.default }));
 }
 
-export type FieldIds = { subject?: string; opener?: string; unsubscribe?: string };
+export type FieldIds = Partial<Record<keyof typeof CUSTOM_FIELDS, string>>;
 
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
 
-/** Finds the ids of the three custom contact fields (see CUSTOM_FIELDS) by name. Missing ones are left undefined. */
+/** Finds the ids of the custom contact fields (see CUSTOM_FIELDS) by name. Missing ones are left undefined. */
 export async function findCustomFields(svc: Services): Promise<FieldIds> {
   const res = await getJson<{ typed_custom_fields?: { id: string; name?: string; modality?: string }[] }>(svc, `${BASE}/typed_custom_fields`, { headers: headers(svc) });
   const fields = (res.typed_custom_fields ?? []).filter((f) => !f.modality || f.modality === 'contact');
   const idOf = (name: string) => fields.find((f) => norm(f.name ?? '') === norm(name))?.id;
-  return { subject: idOf(CUSTOM_FIELDS.subject), opener: idOf(CUSTOM_FIELDS.opener), unsubscribe: idOf(CUSTOM_FIELDS.unsubscribe) };
+  const ids: FieldIds = {};
+  for (const k of Object.keys(CUSTOM_FIELDS) as (keyof typeof CUSTOM_FIELDS)[]) ids[k] = idOf(CUSTOM_FIELDS[k]);
+  return ids;
 }
 
 /** The custom fields still to be created in Apollo, by name. */
@@ -102,11 +104,10 @@ export type SequenceAddResult = {
 };
 
 /**
- * Adds contacts to a sequence, sending from one mailbox. Emails Apollo has not verified are still added (they came from
- * Apollo's own lookup, and the team chose to reach low-confidence matches too). People active or finished in another
- * sequence are skipped, so nobody is emailed twice.
+ * Adds contacts to a sequence, sending from one mailbox. Only verified emails are sequenced (bounces burn the sending
+ * domains). People active or finished in another sequence are skipped, so nobody is emailed twice.
  */
-export async function addToSequence(svc: Services, sequenceId: string, contactIds: string[], emailAccountId: string): Promise<SequenceAddResult> {
+export async function addToSequence(svc: Services, sequenceId: string, contactIds: string[], emailAccountId: string, opts: { allowUnverified?: boolean } = {}): Promise<SequenceAddResult> {
   if (!sequenceId) throw new Error('Choose an Apollo sequence first.');
   if (!emailAccountId) throw new Error('Choose the mailbox to send from first.');
   const res = await getJson<{ contacts?: { id: string }[]; skipped_contact_ids?: Record<string, string> }>(
@@ -115,7 +116,8 @@ export async function addToSequence(svc: Services, sequenceId: string, contactId
       emailer_campaign_id: sequenceId,
       contact_ids: contactIds,
       send_email_from_email_account_id: emailAccountId,
-      sequence_unverified_email: true,
+      // Only the team's own test address is allowed through unverified.
+      sequence_unverified_email: !!opts.allowUnverified,
       sequence_active_in_other_campaigns: false,
       sequence_finished_in_other_campaigns: false,
     })}`,

@@ -1,6 +1,6 @@
 import { PGlite } from '@electric-sql/pglite';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { BATCH_SIZE, bulkMatch, splitFullName, toDetail, usableEmail } from '../src/lib/apollo';
+import { BATCH_SIZE, bulkMatch, parseMatch, splitFullName, toDetail, usableEmail } from '../src/lib/apollo';
 import { enrichStatus, runEnrichment, statusOf } from '../src/lib/enrich';
 import type { Person } from '../src/lib/linkedin';
 import type { Services } from '../src/lib/services';
@@ -59,10 +59,27 @@ describe('request building', () => {
   });
 
   it('rates matches', () => {
+    const m = { email: '', emailStatus: '', confidence: '', title: '', company: '', linkedin: '', id: '', name: '', country: '', city: '', website: '', domain: '', industry: '' };
     expect(statusOf(null)).toBe('no_match');
-    expect(statusOf({ email: '', emailStatus: '', confidence: 'high', title: '', company: '', linkedin: '' })).toBe('no_email');
-    expect(statusOf({ email: 'a@b.com', emailStatus: 'verified', confidence: 'low', title: '', company: '', linkedin: '' })).toBe('low_confidence');
-    expect(statusOf({ email: 'a@b.com', emailStatus: 'verified', confidence: 'medium', title: '', company: '', linkedin: '' })).toBe('matched');
+    expect(statusOf({ ...m, confidence: 'high' })).toBe('no_email');
+    expect(statusOf({ ...m, email: 'a@b.com', emailStatus: 'verified', confidence: 'low' })).toBe('low_confidence');
+    expect(statusOf({ ...m, email: 'a@b.com', emailStatus: 'verified', confidence: 'medium' })).toBe('matched');
+  });
+
+  it('reads the full record Apollo returns for a person looked up by id', () => {
+    const m = parseMatch({
+      id: 'p1',
+      first_name: 'Ada',
+      last_name: 'Obi',
+      title: 'CEO',
+      email: 'ada@acme.ng',
+      email_status: 'verified',
+      linkedin_url: 'http://www.linkedin.com/in/ada',
+      country: 'Nigeria',
+      city: 'Lagos',
+      organization: { name: 'Acme', website_url: 'http://www.acme.ng', primary_domain: 'acme.ng', industry: 'banking', estimated_num_employees: 120 },
+    });
+    expect(m).toMatchObject({ id: 'p1', name: 'Ada Obi', country: 'Nigeria', website: 'http://www.acme.ng', domain: 'acme.ng', industry: 'banking', org: { employees: 120 } });
   });
 });
 

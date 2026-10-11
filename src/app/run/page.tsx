@@ -1,90 +1,97 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RunBadge } from '../../components/badges';
 import { api, countryName, formatDate, personalizeWaiting, post } from '../../lib/client';
-import type { EnrichSummary } from '../../lib/enrich';
-import { SEGMENTS, segmentById } from '../../lib/icp';
-import type { Run } from '../../lib/run';
+import type { EnrichStatus } from '../../lib/enrich';
+import { MARKETS, MARKET_LIST, marketShort } from '../../lib/markets';
+import type { Run, StepSummary } from '../../lib/run';
+import type { Settings } from '../../lib/settings';
+import { SECTORS, SECTOR_LABEL } from '../../lib/targeting';
 
 const ratio = (a: number, b: number) => (b ? (a / b).toFixed(1) : '—');
 
-const SIZES = [
-  { searches: 10, label: 'Quick', hint: '10 searches' },
-  { searches: 30, label: 'Standard', hint: '30 searches' },
-  { searches: 60, label: 'Large', hint: '60 searches' },
+const TARGETS = [
+  { n: 100, label: 'Quick', hint: '100 new leads' },
+  { n: 250, label: 'Half day', hint: '250 new leads' },
+  { n: 500, label: 'Full day', hint: '500 new leads' },
 ];
 
-/** Every title the ICP looks for, once each, for the summary. */
-const ALL_TITLES = [...new Set(SEGMENTS.flatMap((s) => s.titles))];
-
 export default function RunPage() {
-  const [size, setSize] = useState(30);
-  const [withApollo, setWithApollo] = useState(false);
-  const [apolloLimit, setApolloLimit] = useState(20);
-
+  const [target, setTarget] = useState(500);
   const [run, setRun] = useState<Run | null>(null);
   const [history, setHistory] = useState<Run[]>([]);
+  const [enrich, setEnrich] = useState<EnrichStatus | null>(null);
+  const [settings, setSettings] = useState<Settings | null>(null);
   const [log, setLog] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const stop = useRef(false);
 
-  const loadHistory = useCallback(() => {
+  const load = useCallback(() => {
     api<{ runs: Run[] }>('/api/runs').then((d) => setHistory(d.runs)).catch(() => {});
+    api<{ enrich: EnrichStatus }>('/api/overview').then((d) => setEnrich(d.enrich)).catch(() => {});
   }, []);
-  useEffect(loadHistory, [loadHistory]);
+  useEffect(() => {
+    load();
+    api<{ settings: Settings }>('/api/settings').then((d) => setSettings(d.settings)).catch(() => {});
+  }, [load]);
 
   const say = (line: string) => setLog((l) => [...l, line]);
 
-  async function drive(start: Run, apollo: number | null) {
+  async function drive(start: Run) {
     stop.current = false;
     setBusy(true);
     setError('');
     let r = start;
     setRun(r);
+    const goal = r.brief.target || target;
+    const readyAtStart = r.apollo_with_email;
     try {
-      while (r.status === 'running' && r.next_index < r.queries.length) {
+      while (r.status === 'running' && r.next_index < r.queries.length && r.apollo_with_email < goal) {
         if (stop.current) {
-          r = (await api<{ run: Run }>(`/api/runs/${r.id}/finish`, post({ status: 'stopped' }))).run;
-          setRun(r);
           say('Stopped. Everyone found so far is saved.');
-          return;
+          break;
         }
-        const before = r;
         const q = r.queries[r.next_index];
-        r = (await api<{ run: Run }>(`/api/runs/${r.id}/step`, post())).run;
-        setRun(r);
-        say(`${r.next_index}/${r.queries.length} · ${countryName(q.geo)} · ${segmentById(q.segment)?.label ?? 'Search'}${q.startPage > 1 ? ` (from page ${q.startPage})` : ''}: ${r.inserted - before.inserted} new, ${r.updated - before.updated} already saved, ${r.excluded - before.excluded} based elsewhere`);
-      }
-      if (r.status === 'running' && apollo) {
-        say('Getting emails from Apollo…');
-        const d = await api<{ run: Run; summary: EnrichSummary }>(`/api/runs/${r.id}/enrich`, post({ limit: apollo, confirm: true }));
+        const d = await api<{ run: Run; summary: StepSummary }>(`/api/runs/${r.id}/step`, post());
         r = d.run;
         setRun(r);
-        say(`Apollo: ${d.summary.requested} looked up, ${d.summary.withEmail} emails ready, ${d.summary.credits} credits${d.summary.stopped ? `. ${d.summary.stopped}` : ''}`);
-        if (d.summary.withEmail > 0) {
-          // Every new email gets its personal opener from the news straight away.
-          say('Reading the news to personalize each email…');
-          try {
-            const p = await personalizeWaiting(d.summary.withEmail);
-            say(`Personalized ${p.done} emails${p.none ? `; ${p.none} had no specific news (write those on the Outreach page)` : ''}${p.failed ? `; ${p.failed} failed: ${p.error}` : ''}.`);
-          } catch (e) {
-            say(`Could not personalize: ${(e as Error).message}. Use Personalize on the Outreach page.`);
-          }
+        const s = d.summary;
+        say(
+          `${r.next_index}/${r.queries.length} · ${marketShort(q.market)} · ${q.label}${q.page > 1 ? ` · page ${q.page}` : ''}: ${s.searched} found, ${s.wanted} with a target title, ${s.lookedUp} looked up, ${s.ready} new ready to email`,
+        );
+        if (s.stopped) {
+          say(s.stopped);
+          break;
+        }
+      }
+      const fresh = r.apollo_with_email - readyAtStart;
+      if (fresh > 0) {
+        // Every new lead gets its personal opener from the news straight away.
+        say(`Reading the news to personalize ${fresh} new emails…`);
+        try {
+          const p = await personalizeWaiting(fresh, (done) => setLog((l) => [...l.slice(0, -1), `Personalizing from the news… ${done} of ${fresh} done.`]));
+          say(`Personalized ${p.done} emails${p.failed ? `; ${p.failed} failed (${p.error}) and are retried on the Outreach page` : ''}.`);
+        } catch (e) {
+          say(`Could not personalize: ${(e as Error).message}. It runs again when the Outreach page opens.`);
         }
       }
       if (r.status === 'running') {
-        r = (await api<{ run: Run }>(`/api/runs/${r.id}/finish`, post({ status: 'done' }))).run;
-        setRun(r);
-        say('Done.');
+        const done = stop.current || r.apollo_with_email >= goal || r.next_index >= r.queries.length;
+        if (done) {
+          r = (await api<{ run: Run }>(`/api/runs/${r.id}/finish`, post({ status: stop.current ? 'stopped' : 'done' }))).run;
+          setRun(r);
+          say(r.apollo_with_email >= goal ? `Done: ${r.apollo_with_email} new leads ready to email.` : 'Done.');
+        }
       }
     } catch (e) {
       setError(`${(e as Error).message} Nothing found so far is lost. Press Continue to retry.`);
       say(`Paused: ${(e as Error).message}`);
     } finally {
       setBusy(false);
-      loadHistory();
+      load();
     }
   }
 
@@ -92,9 +99,9 @@ export default function RunPage() {
     setLog([]);
     setError('');
     try {
-      const d = await api<{ run: Run }>('/api/runs', post({ maxQueries: size, pages: 2 }));
-      say(`Started: ${d.run.queries.length} searches across the UAE, the US, the UK and Canada.`);
-      await drive(d.run, withApollo ? apolloLimit : null);
+      const d = await api<{ run: Run }>('/api/runs', post({ target }));
+      say(`Started: up to ${d.run.queries.length} searches across ${countryName(d.run.geo)}, until ${target} new leads are ready to email.`);
+      await drive(d.run);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -102,18 +109,20 @@ export default function RunPage() {
 
   function resume(r: Run) {
     setLog([`Continuing the run from ${formatDate(r.created_at)}.`]);
-    drive(r, withApollo ? apolloLimit : null);
+    drive(r);
   }
 
-  const done = run ? run.next_index : 0;
-  const totalQ = run ? run.queries.length : 0;
+  const goal = run?.brief.target || target;
+  const left = enrich ? Math.max(0, enrich.dailyLimit - enrich.usedToday) : null;
 
   return (
     <div className="page">
       <div className="page-head">
         <div>
           <h1>Find leads</h1>
-          <p className="sub">One click finds successful people in the UAE, the US, the UK and Canada: the founder, CEO or managing director of a company, and the CIO or managing partner of a fund. Each run searches somewhere new, so running it again keeps finding new people.</p>
+          <p className="sub">
+            One click finds company leaders in Africa, Europe, the US and the UAE through Apollo. The title is picked by each company&apos;s size and industry, clients and anyone contacted before are skipped, and every lead comes with a verified email, website, LinkedIn, company size, industry and country.
+          </p>
         </div>
       </div>
 
@@ -121,22 +130,20 @@ export default function RunPage() {
         <section className="card">
           <h2>Start a run</h2>
           <div>
-            <div className="section-label">Run size</div>
-            <div className="segmented" role="radiogroup" aria-label="Run size">
-              {SIZES.map((s) => (
-                <button key={s.searches} role="radio" aria-checked={size === s.searches} className={size === s.searches ? 'on' : ''} onClick={() => setSize(s.searches)} disabled={busy}>
-                  <b>{s.label}</b>
-                  <span>{s.hint}</span>
+            <div className="section-label">How many new leads</div>
+            <div className="segmented" role="radiogroup" aria-label="New leads">
+              {TARGETS.map((t) => (
+                <button key={t.n} role="radio" aria-checked={target === t.n} className={target === t.n ? 'on' : ''} onClick={() => setTarget(t.n)} disabled={busy}>
+                  <b>{t.label}</b>
+                  <span>{t.hint}</span>
                 </button>
               ))}
             </div>
           </div>
-          <div className="row">
-            <label className="check"><input id="run-apollo" type="checkbox" checked={withApollo} onChange={(e) => setWithApollo(e.target.checked)} disabled={busy} /> Then get emails from Apollo for up to</label>
-            <input id="run-apollo-limit" type="number" min={1} max={100} value={apolloLimit} onChange={(e) => setApolloLimit(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} disabled={busy || !withApollo} style={{ width: 90 }} aria-label="Apollo lookups" />
-            <span className="muted small">people</span>
-          </div>
-          <p className="muted small">Uses up to {size * 2} Serper credits{withApollo ? ` and about ${apolloLimit} Apollo credits` : ''}.</p>
+          <p className="muted small">
+            Searching is free. Each person looked up costs about 1 Apollo credit, and only people with a target title and a verified email on record are looked up.{' '}
+            {left !== null && <>{left} lookups left today (limit {enrich?.dailyLimit}, set by <code>APOLLO_DAILY_LIMIT</code>).</>}
+          </p>
           <div className="row">
             <button className="primary big" onClick={start} disabled={busy}>{busy ? 'Finding leads…' : 'Find leads'}</button>
             {busy && <button className="danger" onClick={() => (stop.current = true)}>Stop after this search</button>}
@@ -146,12 +153,29 @@ export default function RunPage() {
         </section>
 
         <section className="card">
-          <h2>Who we look for</h2>
-          <p className="muted small">Successful people who lead a company, in the <b>UAE</b>, the <b>United States</b>, the <b>United Kingdom</b> and <b>Canada</b>, at companies of about 25 to 10,000 employees. People based anywhere else are skipped.</p>
-          <div className="chips">
-            {ALL_TITLES.map((t) => <span key={t} className="chip">{t}</span>)}
+          <div className="card-head">
+            <h2>Who we look for</h2>
+            <Link href="/targeting" className="small">Change the rules</Link>
           </div>
-          <p className="muted small">Across {SEGMENTS.map((s) => s.label.toLowerCase()).join(', ')}.</p>
+          <p className="muted small">
+            Based in {MARKET_LIST.map((m) => MARKETS[m].label).join(', ')} (Africa and Europe searched twice as often). Small firms are up to 50 employees.
+          </p>
+          {settings && (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Industry</th><th>Small firms</th><th>Large firms</th></tr></thead>
+                <tbody>
+                  {SECTORS.map((s) => (
+                    <tr key={s}>
+                      <td><b>{SECTOR_LABEL[s]}</b></td>
+                      <td className="small">{settings.rules[s].small.join(', ')}</td>
+                      <td className="small">{settings.rules[s].large.join(', ')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       </div>
 
@@ -161,17 +185,16 @@ export default function RunPage() {
             <h2>This run</h2>
             <RunBadge status={run.status} error={busy ? '' : run.error} />
           </div>
-          <div className="progress" aria-label="Progress"><div style={{ width: `${totalQ ? (done / totalQ) * 100 : 0}%` }} /></div>
-          <p className="muted small">{done} of {totalQ} searches done</p>
+          <div className="progress" aria-label="Progress"><div style={{ width: `${Math.min(100, goal ? (run.apollo_with_email / goal) * 100 : 0)}%` }} /></div>
+          <p className="muted small">{run.apollo_with_email} of {goal} new leads ready to email · {run.next_index} of {run.queries.length} searches done</p>
           <div className="stats">
-            <div className="stat"><div className="n">{run.inserted}</div><div className="l">New people</div></div>
-            <div className="stat"><div className="n">{run.updated}</div><div className="l">Already saved</div></div>
-            <div className="stat"><div className="n">{run.excluded}</div><div className="l">Based elsewhere, skipped</div></div>
-            <div className="stat"><div className="n">{run.apollo_with_email}</div><div className="l">Emails ready</div></div>
-            <div className="stat"><div className="n">{run.searches}</div><div className="l">Serper searches</div></div>
+            <div className="stat"><div className="n">{run.apollo_with_email}</div><div className="l">New leads ready to email</div></div>
+            <div className="stat"><div className="n">{run.inserted}</div><div className="l">New leads saved</div></div>
+            <div className="stat"><div className="n">{run.results}</div><div className="l">People searched</div></div>
+            <div className="stat"><div className="n">{run.found}</div><div className="l">With a target title</div></div>
+            <div className="stat"><div className="n">{run.apollo_requested}</div><div className="l">Looked up in Apollo</div></div>
             <div className="stat"><div className="n">{run.apollo_credits}</div><div className="l">Apollo credits</div></div>
-            <div className="stat"><div className="n">{ratio(run.searches, run.inserted)}</div><div className="l">Searches per new person</div></div>
-            <div className="stat"><div className="n">{ratio(run.apollo_credits, run.apollo_with_email)}</div><div className="l">Credits per email</div></div>
+            <div className="stat"><div className="n">{ratio(run.apollo_credits, run.apollo_with_email)}</div><div className="l">Credits per ready lead</div></div>
           </div>
           {log.length > 0 && <div className="log" aria-live="polite">{log.join('\n')}</div>}
         </section>
@@ -183,7 +206,7 @@ export default function RunPage() {
           <div className="table-wrap">
             <table>
               <thead>
-                <tr><th>Started</th><th>Countries</th><th className="num">Searches</th><th className="num">New people</th><th className="num">Emails</th><th className="num">Apollo credits</th><th>Status</th><th></th></tr>
+                <tr><th>Started</th><th>Markets</th><th className="num">Searches</th><th className="num">New leads</th><th className="num">Ready to email</th><th className="num">Apollo credits</th><th>Status</th><th></th></tr>
               </thead>
               <tbody>
                 {history.map((r) => (
@@ -195,7 +218,7 @@ export default function RunPage() {
                     <td className="num">{r.apollo_with_email}</td>
                     <td className="num">{r.apollo_credits}</td>
                     <td><RunBadge status={r.status} error={r.error} /></td>
-                    <td>{r.status === 'running' && !busy ? <button className="link" onClick={() => resume(r)}>Continue</button> : null}</td>
+                    <td>{r.status === 'running' && !busy && r.queries[0]?.titles.length ? <button className="link" onClick={() => resume(r)}>Continue</button> : null}</td>
                   </tr>
                 ))}
               </tbody>

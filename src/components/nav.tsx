@@ -7,8 +7,11 @@ const LINKS = [
   { href: '/', label: 'Overview' },
   { href: '/run', label: 'Find leads' },
   { href: '/leads', label: 'Leads' },
-  { href: '/emails', label: 'Emails (Apollo)' },
-  { href: '/outreach', label: 'Outreach (Apollo)' },
+  { href: '/outreach', label: 'Outreach' },
+  { href: '/deliverability', label: 'Deliverability' },
+  { href: '/results', label: 'Results' },
+  { href: '/suppression', label: 'Suppression list' },
+  { href: '/targeting', label: 'Targeting' },
   { href: '/tools', label: 'Tools' },
 ];
 

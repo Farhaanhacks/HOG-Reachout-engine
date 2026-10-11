@@ -72,13 +72,13 @@ export async function googleSearch(svc: Services, q: string, geo: Geo, page = 1)
 
 export type NewsResult = { title?: string; link?: string; snippet?: string; date?: string; source?: string };
 
-/** Google News through Serper for one country, from the past year. */
-export async function newsSearch(svc: Services, q: string, geo: Geo): Promise<NewsResult[]> {
+/** Google News through Serper for one country (an engine country code or Google's own, e.g. "ng"), from the past year. */
+export async function newsSearch(svc: Services, q: string, geo: Geo | string): Promise<NewsResult[]> {
   if (!svc.keys.serper) throw new Error('SERPER_API_KEY is not set');
   const data = await getJson<{ news?: NewsResult[] }>(svc, 'https://google.serper.dev/news', {
     method: 'POST',
     headers: { 'X-API-KEY': svc.keys.serper, 'content-type': 'application/json' },
-    body: JSON.stringify({ q, gl: GEOS[geo].gl, num: 5, tbs: 'qdr:y' }),
+    body: JSON.stringify({ q, gl: geo in GEOS ? GEOS[geo as Geo].gl : geo || 'us', num: 5, tbs: 'qdr:y' }),
   });
   return Array.isArray(data.news) ? data.news : [];
 }

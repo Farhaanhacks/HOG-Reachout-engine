@@ -93,7 +93,7 @@ export default function Step6() {
                     <td style={cell}>{p.labels || '—'}</td>
                     <td style={cell}>{geoShort(p.geo)} ({p.geo_match})</td>
                     <td style={cell}>{p.seen_count}×</td>
-                    <td style={cell}><a href={p.linkedin_url}>open</a></td>
+                    <td style={cell}><a href={p.linkedin_url ?? undefined}>open</a></td>
                   </tr>
                 ))}
               </tbody>

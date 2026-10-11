@@ -11,21 +11,38 @@ export const PITCH = {
 
 /**
  * The Apollo custom contact fields that carry each person's own email parts into the sequence. The team creates these
- * three fields once in Apollo (Settings, Objects and fields, Contact), with exactly these names.
+ * fields once in Apollo (Settings, Objects and fields, Contact), with exactly these names. The edition title and the
+ * industry line change per segment, so they are fields too, never written into the template.
  */
 export const CUSTOM_FIELDS = {
   subject: 'HOG Subject',
   opener: 'HOG Opener',
   unsubscribe: 'HOG Unsubscribe link',
+  edition: 'HOG Edition',
+  industry: 'HOG Industry',
 } as const;
 
-export type DraftInput = { name: string; title: string; company: string; /** The personal first line, when one was written. */ opener?: string };
+export type DraftInput = {
+  name: string;
+  title: string;
+  company: string;
+  /** The personal first line, when one was written. */
+  opener?: string;
+  /** The edition they are pitched for ("Healthcare Leaders Edition") and its industry line ("Healthcare Leaders"). */
+  edition?: string;
+  industryLine?: string;
+};
 export type Draft = { firstName: string; subject: string; body: string };
 
 const HONORIFIC = /^(dr|mr|mrs|ms|miss|eng|engr|prof|sir|he|h\.e|sheikh|shaikh)\.?$/i;
 
-const AFTER_OPENER =
-  "That's why I'm reaching out from Humans of Globe. We're putting together our next global feature on leaders who are building something worth talking about, and we'd love to include your story.";
+const DEFAULT_EDITION = 'Global Leaders Edition';
+const DEFAULT_INDUSTRY_LINE = 'Business Leaders';
+
+/** The line after the opener, naming the edition and its industry line. */
+function afterOpener(edition: string, industryLine: string): string {
+  return `That's why I'm reaching out from Humans of Globe. We're putting together our upcoming ${edition}, a global feature on ${industryLine} who are building something worth talking about, and we'd love to include your story.`;
+}
 
 /** The fixed part of every email, after the personal opening. */
 const PITCH_PARAGRAPHS = [
@@ -67,12 +84,14 @@ function roleLine(title: string, company: string): string {
 export function draftEmail(p: DraftInput): Draft {
   const firstName = firstNameOf(p.name);
   const opener = p.opener?.trim();
+  const edition = p.edition?.trim() || DEFAULT_EDITION;
+  const industryLine = p.industryLine?.trim() || DEFAULT_INDUSTRY_LINE;
   const body = [
     `Hi ${firstName},`,
     '',
     opener
-      ? `${opener}\n\n${AFTER_OPENER}`
-      : `I'm reaching out from Humans of Globe. We're putting together our next global feature on leaders who are building something worth talking about, and your work${roleLine(p.title, p.company)} stood out.`,
+      ? `${opener}\n\n${afterOpener(edition, industryLine)}`
+      : `I'm reaching out from Humans of Globe. We're putting together our upcoming ${edition}, a global feature on ${industryLine} who are building something worth talking about, and your work${roleLine(p.title, p.company)} stood out.`,
     '',
     PITCH_PARAGRAPHS.join('\n\n'),
   ].join('\n');
@@ -80,8 +99,8 @@ export function draftEmail(p: DraftInput): Draft {
 }
 
 /**
- * The email to paste into the Apollo sequence's email step, once. Each person's subject, opener and unsubscribe link
- * come from their custom fields, so every email is still personal; the rest is the same fixed pitch as draftEmail.
+ * The email to paste into the Apollo sequence's email step, once. Each person's subject, opener, edition, industry line
+ * and unsubscribe link come from their custom fields, so every email is still personal; the rest is the same fixed pitch as draftEmail.
  */
 export function sequenceTemplate(): { subject: string; body: string } {
   return {
@@ -91,7 +110,7 @@ export function sequenceTemplate(): { subject: string; body: string } {
       '',
       `{{${CUSTOM_FIELDS.opener}}}`,
       '',
-      AFTER_OPENER,
+      afterOpener(`{{${CUSTOM_FIELDS.edition}}}`, `{{${CUSTOM_FIELDS.industry}}}`),
       '',
       PITCH_PARAGRAPHS.join('\n\n'),
       '',

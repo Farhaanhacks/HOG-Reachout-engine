@@ -1,4 +1,4 @@
-import { geoShort } from './geo';
+import { marketShort } from './markets';
 
 /** Calls one of the app's API routes from the browser. The login cookie goes along automatically. Throws with the server's message. */
 export async function api<T>(url: string, init?: RequestInit): Promise<T> {
@@ -32,8 +32,45 @@ export async function personalizeWaiting(count: number, onProgress?: (done: numb
   return total;
 }
 
-/** "ae" gives "UAE"; "ae,us" gives "UAE + US". */
-export const countryName = (geo: string) => geo.split(',').map(geoShort).join(' + ');
+/** "af" gives "Africa"; "af,eu" gives "Africa + Europe". */
+export const countryName = (geo: string) => geo.split(',').map(marketShort).join(' + ');
+
+/** 0.0312 gives "3.1%"; nothing to divide gives "—". */
+export const pct = (n: number, of: number) => (of ? `${((n / of) * 100).toFixed(1)}%` : '—');
+
+/** Reads a CSV file's text into rows of cells: quoted cells, commas and line breaks inside quotes, and a semicolon or tab separator. */
+export function parseCsv(text: string): string[][] {
+  const clean = text.replace(/^\uFEFF/, '');
+  const firstLine = clean.split(/\r?\n/, 1)[0] ?? '';
+  const sep = [',', ';', '\t'].sort((a, b) => firstLine.split(b).length - firstLine.split(a).length)[0];
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < clean.length; i++) {
+    const c = clean[i];
+    if (quoted) {
+      if (c === '"' && clean[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else if (c === '"') quoted = false;
+      else cell += c;
+    } else if (c === '"' && cell === '') quoted = true;
+    else if (c === sep) {
+      row.push(cell);
+      cell = '';
+    } else if (c === '\n' || c === '\r') {
+      if (c === '\r' && clean[i + 1] === '\n') i++;
+      row.push(cell);
+      if (row.some((x) => x.trim())) rows.push(row);
+      row = [];
+      cell = '';
+    } else cell += c;
+  }
+  row.push(cell);
+  if (row.some((x) => x.trim())) rows.push(row);
+  return rows;
+}
 
 export function formatDate(value: string | null | undefined): string {
   if (!value) return '—';

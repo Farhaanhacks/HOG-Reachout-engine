@@ -86,7 +86,7 @@ export default function Step9() {
           <div style={{ overflowX: 'auto' }}>
             <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 14 }}>
               <thead><tr>{['Name', 'Title', 'Company', 'Profile'].map((h) => <th key={h} style={cell}>{h}</th>)}</tr></thead>
-              <tbody>{preview.map((p) => <tr key={String(p.id)}><td style={cell}>{p.name}</td><td style={cell}>{p.title || '—'}</td><td style={cell}>{p.company || '—'}</td><td style={cell}><a href={p.linkedin_url}>open</a></td></tr>)}</tbody>
+              <tbody>{preview.map((p) => <tr key={String(p.id)}><td style={cell}>{p.name}</td><td style={cell}>{p.title || '—'}</td><td style={cell}>{p.company || '—'}</td><td style={cell}><a href={p.linkedin_url ?? undefined}>open</a></td></tr>)}</tbody>
             </table>
           </div>
         </>
@@ -100,7 +100,7 @@ export default function Step9() {
               <tbody>
                 {done.map((p) => (
                   <tr key={String(p.id)}>
-                    <td style={cell}><a href={p.linkedin_url}>{p.name}</a></td>
+                    <td style={cell}><a href={p.linkedin_url ?? undefined}>{p.name}</a></td>
                     <td style={cell}>{p.company || '—'}</td>
                     <td style={cell}>{p.email || '—'}</td>
                     <td style={cell}>{p.email_status || '—'}</td>

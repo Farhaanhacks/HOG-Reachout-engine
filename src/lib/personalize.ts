@@ -1,5 +1,6 @@
 import { askDeepSeekJson } from './ai';
-import { isGeo, type Geo } from './geo';
+import { isGeo } from './geo';
+import { glForCountry } from './markets';
 import { newsSearch, mapLimit, type NewsResult, type Services } from './services';
 import { READY_SQL, ensureSchema, type Db } from './store';
 
@@ -24,7 +25,7 @@ Rules:
 
 Reply with JSON only: {"opener": "...", "fact_used": "the fact you referred to, in a few words"}`;
 
-type Lead = { id: number | string; name: string; title: string; company: string; geo: string; snippet: string };
+type Lead = { id: number | string; name: string; title: string; company: string; geo: string; country?: string; industry?: string; snippet: string };
 
 /** Replaces the person's full name and each part of it (3+ letters) with "the person", case-insensitively. */
 export function redactName(text: string, name: string): string {
@@ -44,7 +45,8 @@ export function factsFor(lead: Lead, news: NewsResult[]): string {
   const lines = [
     `Job title: ${lead.title || 'unknown'}`,
     `Company: ${lead.company || 'unknown'}`,
-    `Country: ${lead.geo.toUpperCase()}`,
+    `Country: ${lead.country || lead.geo.toUpperCase()}`,
+    lead.industry ? `Industry: ${lead.industry}` : '',
     lead.snippet ? `From their LinkedIn profile: ${redactName(lead.snippet, lead.name).slice(0, 600)}` : '',
     ...news.slice(0, 4).map((n, i) => `News ${i + 1}${n.date ? ` (${n.date})` : ''}${n.source ? `, ${n.source}` : ''}: ${redactName(`${n.title ?? ''}. ${n.snippet ?? ''}`, lead.name).slice(0, 300)}`),
   ];
@@ -74,7 +76,7 @@ export type PersonalizeSummary = { done: number; none: number; failed: number; s
 /** People with an email ready, not yet sent, and not yet personalized: main people first. */
 async function waiting(db: Db, limit: number): Promise<Lead[]> {
   return db.query<Lead>(
-    `SELECT id, name, title, company, geo, snippet FROM people
+    `SELECT id, name, title, company, geo, country, industry, snippet FROM people
      WHERE ${READY_SQL} AND email <> '' AND sequence_status = '' AND opener_status IN ('', 'none')
      ORDER BY COALESCE(rank, 3) ASC, apollo_checked_at ASC NULLS LAST, id ASC LIMIT $1`,
     [Math.max(1, Math.min(limit, 25))],
@@ -100,6 +102,8 @@ export async function personalizeNext(svc: Services, db: Db, limit: number): Pro
     } catch (e) {
       summary.failed++;
       summary.error = (e as Error).message;
+      // Searches made before the failure were still charged.
+      summary.searches += (e as Error & { searches?: number }).searches ?? 0;
     }
   });
   return summary;
@@ -112,7 +116,7 @@ export async function personalizeNext(svc: Services, db: Db, limit: number): Pro
  * cannot be reached, leaving the lead as it was.
  */
 async function personalizeLead(svc: Services, db: Db, lead: Lead): Promise<{ opener: string; fact: string; searches: number }> {
-  const geo: Geo = isGeo(lead.geo) ? lead.geo : 'us';
+  const geo = isGeo(lead.geo) && !lead.country ? lead.geo : glForCountry(lead.country);
   const news: NewsResult[] = [];
   let searches = 0;
   if (lead.company) {
@@ -128,7 +132,12 @@ async function personalizeLead(svc: Services, db: Db, lead: Lead): Promise<{ ope
       }
     }
   }
-  const reply = await askDeepSeekJson(svc, SYSTEM_PROMPT, factsFor(lead, news));
+  let reply: Awaited<ReturnType<typeof askDeepSeekJson>>;
+  try {
+    reply = await askDeepSeekJson(svc, SYSTEM_PROMPT, factsFor(lead, news));
+  } catch (e) {
+    throw Object.assign(e as Error, { searches });
+  }
   // Every lead gets an opener: from the news or their profile when DeepSeek finds something, otherwise from their
   // role and company. Nobody is held back.
   const written = cleanOpener(reply?.opener);
@@ -145,7 +154,7 @@ async function personalizeLead(svc: Services, db: Db, lead: Lead): Promise<{ ope
 export async function personalizeOne(svc: Services, db: Db, id: number | string): Promise<{ status: 'done' | 'none'; opener: string; fact: string }> {
   if (!svc.keys.deepseek) throw new Error('DEEPSEEK_API_KEY is not set');
   await ensureSchema(db);
-  const [lead] = await db.query<Lead>('SELECT id, name, title, company, geo, snippet FROM people WHERE id = $1', [id]);
+  const [lead] = await db.query<Lead>('SELECT id, name, title, company, geo, country, industry, snippet FROM people WHERE id = $1', [id]);
   if (!lead) throw new Error('Lead not found');
   const { opener, fact } = await personalizeLead(svc, db, lead);
   return { status: opener ? 'done' : 'none', opener, fact };

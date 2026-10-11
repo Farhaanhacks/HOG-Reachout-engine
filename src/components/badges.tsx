@@ -1,4 +1,4 @@
-import { geoShort } from '../lib/geo';
+import { marketShort } from '../lib/markets';
 
 const RUN: Record<string, [string, string]> = {
   running: ['accent', 'Running'],
@@ -20,17 +20,28 @@ const EMAIL: Record<string, [string, string]> = {
   no_match: ['', 'Not in Apollo'],
 };
 
-export function EmailBadge({ status }: { status: string }) {
-  const [tone, label] = EMAIL[status] ?? ['', status];
+/** The email's state. Only verified emails are sent, so anything else says so. */
+export function EmailBadge({ status, emailStatus }: { status: string; emailStatus?: string }) {
+  if ((status === 'matched' || status === 'low_confidence') && emailStatus !== undefined && emailStatus !== 'verified') {
+    return <span className="badge warn" title="Only verified emails are sent, to protect the sending domains">Not verified · not sent</span>;
+  }
+  const [tone, label] = status === 'matched' || status === 'low_confidence' ? ['ok', 'Verified email'] : (EMAIL[status] ?? ['', status]);
   return <span className={`badge ${tone}`}>{label}</span>;
 }
 
-/** The company's size against the ICP's 25–10,000 employees, once Apollo has looked the person up. */
-export function SizeBadge({ size, employees }: { size: string; employees: number | null }) {
-  if (size === 'fit') return <span className="badge" title="Within 25–10,000 employees">{employees ? `${employees.toLocaleString()} employees` : 'Size fits'}</span>;
+/** The person's name, linked to their LinkedIn profile when there is one. */
+export function PersonName({ p }: { p: { name: string; linkedin_url: string | null } }) {
+  const name = p.name || 'Unnamed';
+  return p.linkedin_url ? <a href={p.linkedin_url} target="_blank" rel="noreferrer">{name}</a> : <span>{name}</span>;
+}
+
+/** Company size: small (up to 50 employees) or large, from Apollo. */
+export function SizeBadge({ size, employees, firmSize }: { size: string; employees: number | null; firmSize?: string }) {
+  const count = employees ? `${employees.toLocaleString()} employees` : '';
+  if (firmSize === 'small') return <span className="badge" title="Up to 50 employees: Owner, CEO or Founder">{count || 'Small firm'} · small</span>;
+  if (firmSize === 'large') return <span className="badge" title="Over 50 employees: Managing Director, President and similar">{count || 'Large firm'} · large</span>;
+  if (size === 'fit' || size === 'too_small' || size === 'too_large') return count ? <span className="badge">{count}</span> : null;
   if (size === 'big_enough') return <span className="badge" title="No employee count, but revenue, funding or a listing shows a real company">Established company</span>;
-  if (size === 'too_small') return <span className="badge bad" title="Fewer than 25 employees: not emailed">{employees ? `${employees} employees · too small` : 'Too small'}</span>;
-  if (size === 'too_large') return <span className="badge bad" title="More than 10,000 employees: not emailed">{employees ? `${employees.toLocaleString()} employees · too large` : 'Too large'}</span>;
   return null;
 }
 
@@ -41,7 +52,20 @@ export function RankBadge({ rank }: { rank: number | null | undefined }) {
   return null;
 }
 
-export function CountryBadge({ geo, match }: { geo: string; match?: string }) {
-  const name = geoShort(geo);
+/** Where they are: their country when Apollo gave one, otherwise the market they were found in. */
+export function CountryBadge({ geo, match, country }: { geo: string; match?: string; country?: string }) {
+  if (country) return <span className="badge accent" title={marketShort(geo)}>{country}</span>;
+  const name = marketShort(geo);
   return <span className={`badge ${match === 'match' ? 'accent' : ''}`} title={match === 'match' ? 'Location confirmed' : 'No location on the profile'}>{name}{match === 'match' ? '' : '?'}</span>;
+}
+
+/** Whether the person's title is one the rules want at their kind of company. */
+export function FitBadge({ fit, note, title }: { fit: boolean | null | undefined; note?: string; title?: string }) {
+  if (fit === false) return <span className="badge bad" title={note}>Not the target title</span>;
+  if (fit && title) return <span className="badge ok" title="Picked by the title rules for this company's size and industry">Target: {title}</span>;
+  return null;
+}
+
+export function SuppressedBadge({ reason }: { reason?: string }) {
+  return reason ? <span className="badge bad" title="On the suppression list: never contacted">Suppressed · {reason}</span> : null;
 }

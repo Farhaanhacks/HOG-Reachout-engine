@@ -3,9 +3,9 @@ import type { Services } from './services';
 import { sizeVerdict } from './size';
 import { READY_SQL, ensureSchema, type Db, type SavedPerson } from './store';
 
-export const DEFAULT_DAILY_LIMIT = 100;
+export const DEFAULT_DAILY_LIMIT = 600;
 
-/** The daily cap on Apollo lookups: APOLLO_DAILY_LIMIT, or 100. */
+/** The daily cap on Apollo lookups: APOLLO_DAILY_LIMIT, or 600 (enough for 400–500 new leads a day). */
 export function dailyLimitFromEnv(): number {
   return Math.max(1, Number(process.env.APOLLO_DAILY_LIMIT) || DEFAULT_DAILY_LIMIT);
 }
@@ -99,7 +99,7 @@ export async function runEnrichment(svc: Services, db: Db, opts: { limit: number
   let current: { list: SavedPerson[]; tier: number } = { list: people, tier: 1 };
 
   try {
-    const t1 = await bulkMatch(svc, people.map((p): ApolloInput => ({ linkedin: p.linkedin_url, name: p.name })));
+    const t1 = await bulkMatch(svc, people.map((p): ApolloInput => ({ linkedin: p.linkedin_url ?? undefined, name: p.name })));
     credits += t1.credits;
     people.forEach((p, i) => results.set(p.id, { m: t1.matches[i], tier: 1 }));
 

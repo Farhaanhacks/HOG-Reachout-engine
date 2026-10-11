@@ -2,11 +2,13 @@ import { NextResponse } from 'next/server';
 import { checkPassword } from '../../../../lib/auth';
 import { toCsv } from '../../../../lib/csv';
 import { getDb } from '../../../../lib/db';
-import { geoShort } from '../../../../lib/geo';
+import { marketShort } from '../../../../lib/markets';
 import { filtersFrom } from '../../../../lib/lead-filters';
 import { draftEmail, unsubscribeLineText } from '../../../../lib/pitch';
 import { unsubscribeUrl } from '../../../../lib/unsubscribe';
+import { getSettings } from '../../../../lib/settings';
 import { listPeople } from '../../../../lib/store';
+import { editionFor } from '../../../../lib/targeting';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,12 +17,24 @@ export async function GET(req: Request) {
   const denied = checkPassword(req);
   if (denied) return denied;
   try {
-    const people = await listPeople(getDb(), { ...filtersFrom(new URL(req.url)), limit: 1000 });
+    const db = getDb();
+    const { editions } = await getSettings(db);
+    const people = await listPeople(db, { ...filtersFrom(new URL(req.url)), limit: 1000 });
     const csv = toCsv(
-      ['Name', 'First name', 'Title', 'Company', 'Location', 'Country', 'Labels', 'LinkedIn', 'Email', 'Email status', 'Apollo result', 'Apollo confidence', 'Employees', 'Company size', 'Personal opener', 'Email subject', 'Email body', 'Unsubscribe link', 'Unsubscribed', 'First seen'],
+      [
+        'Name', 'First name', 'Designation', 'Company', 'Company website', 'LinkedIn', 'Email', 'Email status', 'Employees', 'Company size', 'Industry',
+        'Country', 'Market', 'Target title', 'Fits the title rules', 'Segment', 'Edition', 'Suppressed', 'Sent from', 'Personal opener', 'Email subject',
+        'Email body', 'Unsubscribe link', 'Unsubscribed', 'First seen',
+      ],
       people.map((p) => {
-        const d = draftEmail(p);
-        return [p.name, d.firstName, p.title, p.company, p.location, geoShort(p.geo), p.labels, p.linkedin_url, p.email, p.email_status, p.apollo_status, p.apollo_confidence, p.company_employees ?? '', p.company_size, p.opener ?? '', d.subject, `${d.body}\n\n${unsubscribeLineText(unsubscribeUrl(p.id))}`, unsubscribeUrl(p.id), p.unsubscribed_at ? 'yes' : '', p.first_seen];
+        const e = editionFor(p.industry, editions);
+        const d = draftEmail({ ...p, edition: e.edition, industryLine: e.industryLine });
+        return [
+          p.name, d.firstName, p.title, p.company, p.company_website ?? '', p.linkedin_url ?? '', p.email, p.email_status, p.company_employees ?? '',
+          p.firm_size || p.company_size, p.industry ?? '', p.country || p.location, marketShort(p.geo), p.target_title ?? '',
+          p.icp_fit === false ? 'no' : p.icp_fit ? 'yes' : '', p.segment ?? '', e.edition, p.suppressed_reason ?? '', p.sent_from_email ?? '', p.opener ?? '',
+          d.subject, `${d.body}\n\n${unsubscribeLineText(unsubscribeUrl(p.id))}`, unsubscribeUrl(p.id), p.unsubscribed_at ? 'yes' : '', p.first_seen,
+        ];
       }),
     );
     return new Response(csv, {

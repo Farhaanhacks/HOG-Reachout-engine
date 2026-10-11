@@ -33,7 +33,7 @@ const person: Person = { name: 'A One', title: 'CEO', company: 'Alpha', companyT
 /** One person with a personalized email; `sequenced` also puts them in an Apollo sequence. */
 async function seedOne(sequenced = true): Promise<number> {
   await savePeople(db, [person], 'ae', 'q');
-  await db.query("UPDATE people SET email = 'a@alpha.com', apollo_status = 'matched', company_size = 'fit', opener = 'Your Riyadh office caught our eye.', opener_status = 'done'");
+  await db.query("UPDATE people SET email = 'a@alpha.com', apollo_status = 'matched', email_status = 'verified', company_size = 'fit', opener = 'Your Riyadh office caught our eye.', opener_status = 'done'");
   if (sequenced) await db.query("UPDATE people SET sequence_status = 'added', apollo_contact_id = 'c-1', apollo_sequence_id = 'seq-1'");
   return (await db.query<{ id: number }>('SELECT id FROM people'))[0].id;
 }

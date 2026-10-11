@@ -9,6 +9,7 @@ const STEPS = [
   { href: '/steps/5', title: 'Step 5: Company website', what: "Finds a company's own domain." },
   { href: '/steps/6', title: 'Step 6: Search and save', what: 'One search saved to the database, each LinkedIn profile once.' },
   { href: '/steps/9', title: 'Step 9: Apollo', what: 'The raw Apollo lookup page.' },
+  { href: '/emails', title: 'Emails for earlier LinkedIn leads', what: 'Looks up emails for people found by the earlier Google LinkedIn search.' },
 ];
 
 export default function ToolsPage() {
@@ -17,7 +18,7 @@ export default function ToolsPage() {
       <div className="page-head">
         <div>
           <h1>Tools</h1>
-          <p className="sub">Each build step on its own, for testing and for finding where a problem is. Day-to-day work happens in Find leads, Leads and Emails.</p>
+          <p className="sub">Each build step on its own, for testing and for finding where a problem is. Day-to-day work happens in Find leads, Leads and Outreach. Steps 1 to 6 are the earlier Google LinkedIn search, kept for reference.</p>
         </div>
       </div>
       <section className="card">

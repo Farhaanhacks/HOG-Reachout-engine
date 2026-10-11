@@ -1,20 +1,23 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { EmailBadge } from '../../components/badges';
-import type { EmailAccount, Sequence } from '../../lib/apollo-sequences';
+import Link from 'next/link';
+import { EmailBadge, PersonName } from '../../components/badges';
+import type { Sequence } from '../../lib/apollo-sequences';
 import { api, formatDate, personalizeWaiting, post } from '../../lib/client';
 import type { OutreachStatus, PushSummary } from '../../lib/outreach';
 import { CUSTOM_FIELDS } from '../../lib/pitch';
 import type { SavedPerson } from '../../lib/store';
 
+type Inbox = { id: string; email: string; domain: string; usable: boolean; room: number; newToday: number; addedToday: number; paused: string };
 type Overview = {
   configured: boolean;
   aiConfigured: boolean;
   defaultSequenceId: string;
-  defaultEmailAccountId: string;
   sequences: Sequence[];
-  emailAccounts: EmailAccount[];
+  inboxes: Inbox[];
+  room: number;
+  emailsPerPerson: number;
   missingFields: string[];
   template: { subject: string; body: string };
   apolloError: string;
@@ -25,7 +28,6 @@ type Overview = {
 type Preview = SavedPerson & { preview: { subject: string; body: string } };
 
 const SEQUENCE_KEY = 'hog-apollo-sequence';
-const MAILBOX_KEY = 'hog-apollo-mailbox';
 
 const remembered = (key: string) => {
   try {
@@ -43,7 +45,7 @@ const remember = (key: string, value: string) => {
 export default function OutreachPage() {
   const [data, setData] = useState<Overview | null>(null);
   const [sequenceId, setSequenceId] = useState('');
-  const [mailboxId, setMailboxId] = useState('');
+  const [testInbox, setTestInbox] = useState('');
   const [limit, setLimit] = useState(25);
   const [progress, setProgress] = useState('');
   const [preview, setPreview] = useState<Preview[] | null>(null);
@@ -60,14 +62,7 @@ export default function OutreachPage() {
     const d = await api<Overview>('/api/outreach');
     setData(d);
     const seqIds = d.sequences.map((s) => s.id);
-    const boxIds = d.emailAccounts.filter((a) => a.active).map((a) => a.id);
     setSequenceId((current) => current || [remembered(SEQUENCE_KEY), d.defaultSequenceId].find((id) => id && seqIds.includes(id)) || '');
-    setMailboxId(
-      (current) =>
-        current ||
-        [remembered(MAILBOX_KEY), d.defaultEmailAccountId, d.emailAccounts.find((a) => a.isDefault && a.active)?.id].find((id) => id && boxIds.includes(id)) ||
-        '',
-    );
   }, []);
 
   useEffect(() => {
@@ -111,19 +106,44 @@ export default function OutreachPage() {
 
   const doPush = () =>
     act(async () => {
-      const d = await api<{ summary: PushSummary }>('/api/outreach', post({ action: 'push', limit, sequenceId, emailAccountId: mailboxId, confirm: true }));
+      const d = await api<{ summary: PushSummary }>('/api/outreach', post({ action: 'push', limit, sequenceId, confirm: true }));
       setSummary(d.summary);
       setPreview(null);
+      await load();
+    });
+
+  /** Adds batches of 25 until nobody personalized is waiting, today's room is used up, or something stops it. */
+  const doSendAll = () =>
+    act(async () => {
+      setPreview(null);
+      const total: PushSummary = { requested: 0, added: 0, skipped: 0, failed: 0, reasons: {}, byInbox: {}, paused: [] };
+      for (let i = 0; i < 40; i++) {
+        setProgress(`Sending… ${total.added} added so far.`);
+        const d = await api<{ summary: PushSummary }>('/api/outreach', post({ action: 'push', limit: 25, sequenceId, confirm: true }));
+        const s = d.summary;
+        total.requested += s.requested;
+        total.added += s.added;
+        total.skipped += s.skipped;
+        total.failed += s.failed;
+        for (const [k, v] of Object.entries(s.reasons)) total.reasons[k] = (total.reasons[k] ?? 0) + v;
+        for (const [k, v] of Object.entries(s.byInbox)) total.byInbox[k] = (total.byInbox[k] ?? 0) + v;
+        total.paused.push(...s.paused);
+        if (s.error) total.error = s.error;
+        if (s.stopped) total.stopped = s.stopped;
+        setSummary({ ...total });
+        if (s.stopped || s.requested === 0 || s.failed) break;
+      }
+      setProgress('');
       await load();
     });
 
   const doTest = () =>
     act(async () => {
       setTestResult('');
-      const d = await api<{ added: boolean; reason?: string }>('/api/outreach', post({ action: 'test', sequenceId, emailAccountId: mailboxId, testEmail }));
+      const d = await api<{ added: boolean; reason?: string; from: string }>('/api/outreach', post({ action: 'test', sequenceId, emailAccountId: testInbox, testEmail }));
       setTestResult(
         d.added
-          ? `Added ${testEmail} to the sequence with a real personalized email. It arrives when the sequence's first step sends.`
+          ? `Added ${testEmail} to the sequence with a real personalized email, sending from ${d.from}. It arrives when the sequence's first step sends.`
           : `Apollo did not add ${testEmail}: ${d.reason ?? 'no reason given'}. Remove that contact from the sequence in Apollo to test again.`,
       );
     });
@@ -146,15 +166,16 @@ export default function OutreachPage() {
   }
 
   const sequence = data?.sequences.find((s) => s.id === sequenceId);
-  const left = data ? Math.max(0, data.status.dailyLimit - data.status.sentToday) : 0;
   const ready = !!data && data.configured && !data.apolloError && data.missingFields.length === 0;
+  const usable = data?.inboxes.filter((i) => i.usable) ?? [];
+  const domains = new Set(usable.map((i) => i.domain));
 
   return (
     <div className="page">
       <div className="page-head">
         <div>
           <h1>Outreach (Apollo)</h1>
-          <p className="sub">Every email opens with something specific about that person and ends with a working unsubscribe link. People are added to your Apollo sequence, which sends from your connected mailbox, paces the sending and stops when someone replies.</p>
+          <p className="sub">Every email opens with something specific about that person, names their edition, and ends with a working unsubscribe link. Only verified emails are sent. People are spread across all your inboxes and both domains, each within its warm-up limit, and Apollo sends, paces and stops on reply.</p>
         </div>
       </div>
 
@@ -168,7 +189,9 @@ export default function OutreachPage() {
         <div className="stat"><div className="n">{data?.status.sent ?? '—'}</div><div className="l">In an Apollo sequence</div></div>
         <div className="stat"><div className="n">{data?.status.skipped ?? '—'}</div><div className="l">Declined by Apollo</div></div>
         <div className="stat"><div className="n">{data?.status.unsubscribed ?? '—'}</div><div className="l">Unsubscribed</div></div>
-        <div className="stat"><div className="n">{data ? `${data.status.sentToday}/${data.status.dailyLimit}` : '—'}</div><div className="l">Added today</div></div>
+        <div className="stat"><div className="n">{data?.status.notSendable ?? '—'}</div><div className="l">Unverified or not a target · not sent</div></div>
+        <div className="stat"><div className="n">{data?.status.suppressed ?? '—'}</div><div className="l">Suppressed</div></div>
+        <div className="stat"><div className="n">{data ? `${data.status.sentToday} · ${data.room} left` : '—'}</div><div className="l">Added today · room left</div></div>
       </div>
 
       <div className="grid-run">
@@ -185,16 +208,22 @@ export default function OutreachPage() {
             </select>
           </label>
           {sequence && !sequence.active && <p className="warn-note">This sequence is not active. People are added, but nothing sends until you activate it in Apollo.</p>}
-          <label className="field">
-            Send from
-            <select id="outreach-mailbox" value={mailboxId} onChange={(e) => { setMailboxId(e.target.value); remember(MAILBOX_KEY, e.target.value); }} disabled={busy}>
-              <option value="">Choose a mailbox</option>
-              {data?.emailAccounts.filter((a) => a.active).map((a) => <option key={a.id} value={a.id}>{a.email}</option>)}
-            </select>
-          </label>
-          {data && data.configured && !data.apolloError && data.emailAccounts.filter((a) => a.active).length === 0 && (
-            <p className="warn-note">No mailbox is connected in Apollo yet. Connect one under Settings, Mailboxes.</p>
-          )}
+          <div>
+            <div className="section-label">Sending from</div>
+            {data && !data.inboxes.length && <p className="warn-note">No inbox is connected in Apollo yet. Connect your 6 inboxes under Settings, Mailboxes in Apollo, then reload.</p>}
+            <div className="chips" style={{ marginTop: 8 }}>
+              {data?.inboxes.map((i) => (
+                <span key={i.id} className={`chip ${i.usable ? '' : 'off'}`} title={i.paused || (i.usable ? `${i.addedToday} of ${i.newToday} new people today` : 'Turned off')}>
+                  {i.email} · {i.usable ? `${i.room} left` : i.paused ? 'paused' : 'off'}
+                </span>
+              ))}
+            </div>
+            {data && data.inboxes.length > 0 && (
+              <p className="muted small" style={{ marginTop: 8 }}>
+                Rotating across {usable.length} inboxes on {domains.size} {domains.size === 1 ? 'domain' : 'domains'}. With {data.emailsPerPerson} emails per person, {data.room} more people can start today. <Link href="/deliverability">Limits and health</Link>
+              </p>
+            )}
+          </div>
           <div className="row">
             <label className="check">
               Send the next
@@ -202,22 +231,31 @@ export default function OutreachPage() {
               people
             </label>
             <button onClick={doPreview} disabled={busy}>Preview</button>
-            <button className="primary" onClick={doPush} disabled={busy || !ready || !sequenceId || !mailboxId || !preview?.length} title={!sequenceId || !mailboxId ? 'Choose a sequence and a mailbox' : preview?.length ? '' : 'Preview first'}>
-              {busy ? 'Working…' : `Add ${preview?.length ?? ''} to the sequence`}
+            <button onClick={doPush} disabled={busy || !ready || !sequenceId || !usable.length || !preview?.length} title={!sequenceId ? 'Choose a sequence' : preview?.length ? '' : 'Preview first'}>
+              {`Add ${preview?.length ?? ''} to the sequence`}
+            </button>
+            <button className="primary" onClick={doSendAll} disabled={busy || !ready || !sequenceId || !usable.length || !data?.room || !data?.status.waiting}>
+              {busy ? 'Working…' : `Send all ready (${Math.min(data?.room ?? 0, data?.status.waiting ?? 0)})`}
             </button>
           </div>
-          <p className="muted small">Main decision-makers first. People already in another Apollo sequence are skipped, so nobody gets two sequences. {left} more can be added today.</p>
+          <p className="muted small">Main decision-makers first. People already in another Apollo sequence are skipped, so nobody gets two sequences. Inboxes over the bounce or spam limits are paused automatically before each send.</p>
           {summary && (
             <p className={summary.stopped || summary.failed ? 'warn-note' : 'note'} role="status">
               Added {summary.added} to the sequence
+              {Object.keys(summary.byInbox).length ? ` (${Object.entries(summary.byInbox).map(([inbox, n]) => `${n} from ${inbox}`).join(', ')})` : ''}
               {summary.skipped ? `; Apollo declined ${summary.skipped} (${Object.entries(summary.reasons).map(([why, n]) => `${n} ${why}`).join(', ')})` : ''}
               {summary.failed ? `; ${summary.failed} could not be created in Apollo (${summary.error}) and will go next time` : ''}.
               {summary.stopped ? ` ${summary.stopped}.` : ''}
+              {summary.paused.length ? ` Paused: ${summary.paused.map((x) => `${x.email} (${x.reason})`).join('; ')}.` : ''}
             </p>
           )}
           <div className="row">
             <input id="outreach-test" type="email" placeholder="your@inbox.com" value={testEmail} onChange={(e) => setTestEmail(e.target.value)} style={{ flex: '1 1 200px' }} aria-label="Test email address" />
-            <button onClick={doTest} disabled={busy || !ready || !sequenceId || !mailboxId || !testEmail}>Send a test</button>
+            <select id="outreach-test-inbox" value={testInbox} onChange={(e) => setTestInbox(e.target.value)} aria-label="Send the test from">
+              <option value="">From the first inbox that can send</option>
+              {data?.inboxes.map((i) => <option key={i.id} value={i.id}>From {i.email}</option>)}
+            </select>
+            <button onClick={doTest} disabled={busy || !ready || !sequenceId || !data?.inboxes.length || !testEmail}>Send a test</button>
           </div>
           {testResult && <p className="note small">{testResult}</p>}
           <p className="faint small">{progress || (data && data.status.toPersonalize === 0 ? `All ${data.status.waiting} emails waiting to send are personalized.` : '')}</p>
@@ -227,16 +265,16 @@ export default function OutreachPage() {
           <h2>Set up Apollo once</h2>
           <ol className="muted small steps-list">
             <li>
-              In Apollo, open Settings, Objects and fields, Contact, and create three custom <b>text</b> fields named exactly:{' '}
-              {Object.values(CUSTOM_FIELDS).map((f, i) => (
-                <span key={f}><code>{f}</code>{i < 2 ? ', ' : ''}</span>
+              In Apollo, open Settings, Objects and fields, Contact, and create these custom <b>text</b> fields, named exactly:{' '}
+              {Object.values(CUSTOM_FIELDS).map((f, i, all) => (
+                <span key={f}><code>{f}</code>{i < all.length - 1 ? ', ' : ''}</span>
               ))}
               .{' '}
               {data && data.configured && !data.apolloError && (data.missingFields.length ? <span className="badge warn">{data.missingFields.length} missing</span> : <span className="badge ok">All found</span>)}
             </li>
-            <li>Connect your sending mailbox under Settings, Mailboxes, and let it warm up.</li>
+            <li>Connect all 6 inboxes under Settings, Mailboxes, and turn on warm-up for each one. Set each inbox&apos;s daily limit in Apollo to match the Deliverability page.</li>
             <li>
-              Create a sequence with one automatic email step. Paste the subject and body below. Re-insert each <code>{'{{…}}'}</code> field with Apollo&apos;s <code>{'{ }'}</code> variable picker if it does not turn into a variable.
+              Create a sequence with automatic email steps ({data?.emailsPerPerson ?? 3} emails per person, as set on the Targeting page). Paste the subject and body below into the first step, and keep the unsubscribe line in every step. Re-insert each <code>{'{{…}}'}</code> field with Apollo&apos;s <code>{'{ }'}</code> variable picker if it does not turn into a variable.
             </li>
             <li>Send a test to your own inbox, check it, then activate the sequence.</li>
           </ol>
@@ -293,14 +331,15 @@ export default function OutreachPage() {
         <h2>Sent to Apollo</h2>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Name</th><th>Company</th><th>Email</th><th>Result</th><th>When</th></tr></thead>
+            <thead><tr><th>Name</th><th>Company</th><th>Email</th><th>Result</th><th>Sent from</th><th>When</th></tr></thead>
             <tbody>
               {data?.sent.map((p) => (
                 <tr key={String(p.id)}>
-                  <td><a href={p.linkedin_url} target="_blank" rel="noreferrer">{p.name}</a></td>
+                  <td><PersonName p={p} /></td>
                   <td>{p.company || '—'}</td>
-                  <td>{p.email}<div><EmailBadge status={p.apollo_status} /></div></td>
+                  <td>{p.email}<div><EmailBadge status={p.apollo_status} emailStatus={p.email_status} /></div></td>
                   <td>{p.sequence_status === 'added' ? <span className="badge ok">In sequence</span> : <span className="badge" title={p.sequence_note}>Declined{p.sequence_note ? `: ${p.sequence_note}` : ''}</span>}</td>
+                  <td className="small">{p.sent_from_email || '—'}</td>
                   <td className="small muted">{formatDate(p.sequenced_at)}</td>
                 </tr>
               ))}
@@ -317,7 +356,7 @@ function PreviewRows({ p, open, onToggle }: { p: Preview; open: boolean; onToggl
   return (
     <>
       <tr>
-        <td><a href={p.linkedin_url} target="_blank" rel="noreferrer">{p.name}</a><div className="faint small">{p.email}</div></td>
+        <td><PersonName p={p} /><div className="faint small">{p.email}</div></td>
         <td>{p.company || '—'}</td>
         <td>{p.opener}{p.opener_fact ? <div className="faint small">Based on: {p.opener_fact}</div> : null}</td>
         <td><button className="link small" onClick={onToggle}>{open ? 'Hide email' : 'Full email'}</button></td>
@@ -340,7 +379,7 @@ function HeldRow({ p, busy, onSave }: { p: SavedPerson; busy: boolean; onSave: (
   const [text, setText] = useState('');
   return (
     <tr>
-      <td><a href={p.linkedin_url} target="_blank" rel="noreferrer">{p.name}</a></td>
+      <td><PersonName p={p} /></td>
       <td className="small">{[p.title, p.company].filter(Boolean).join(' at ') || '—'}</td>
       <td>
         <div className="row">
