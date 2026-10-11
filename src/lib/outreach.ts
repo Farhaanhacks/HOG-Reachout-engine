@@ -138,7 +138,7 @@ export async function pushToInstantly(svc: Services, db: Db, opts: { campaignId:
   const people = await pendingOutreach(db, Math.min(opts.limit, room));
   if (!people.length) return none;
 
-  const res = await addLeads(svc, opts.campaignId, people.map(toInstantlyLead));
+  const res = await addLeads(svc, opts.campaignId, people.map((p) => toInstantlyLead(p)));
   const created = new Map(res.created_leads.map((c) => [c.index, c.id]));
   let added = 0;
   for (let i = 0; i < people.length; i++) {
