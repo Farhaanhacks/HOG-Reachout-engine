@@ -18,10 +18,10 @@ function page(title: string, message: string, form = ''): Response {
   @media (prefers-color-scheme:dark){:root{--bg:#111213;--card:#1a1b1d;--fg:#ededee;--muted:#a1a5ab;--accent:#4a84e2}}
   body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;padding:24px 16px;box-sizing:border-box}
   main{max-width:440px;width:100%;background:var(--card);border-radius:16px;padding:36px 32px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
-  h1{font-size:1.5rem;margin:0 0 10px}p{margin:0 0 20px;color:var(--muted)}b.brand{display:block;font-size:.95rem;margin-bottom:18px;color:var(--fg)}
+  h1{font-size:1.5rem;margin:0 0 10px}p{margin:0 0 20px;color:var(--muted)}.brand{display:block;margin-bottom:22px}.brand img{display:block;width:150px;height:auto}
   button{font:inherit;font-weight:600;width:100%;padding:13px 18px;border:0;border-radius:9px;background:var(--accent);color:#fff;cursor:pointer}
   button:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
-</style></head><body><main><b class="brand">Humans of Globe</b><h1>${title}</h1><p>${message}</p>${form}</main></body></html>`;
+</style></head><body><main><picture class="brand"><source srcset="/logo-white.png" media="(prefers-color-scheme: dark)"><img src="/logo-black.png" alt="Humans of Globe" width="247" height="94"></picture><h1>${title}</h1><p>${message}</p>${form}</main></body></html>`;
   return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex' } });
 }
 
