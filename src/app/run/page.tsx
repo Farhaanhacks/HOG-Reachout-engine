@@ -170,7 +170,7 @@ export default function RunPage() {
             </table>
           </div>
           <p className="muted small">
-            Every lead belongs to one brand only, for good. Leads more than one brand covers (a GCC CEO fits all three) are split evenly between them. Gulf = the six GCC countries; Middle East = the GCC plus Jordan, Lebanon, Iraq, Egypt, Turkey, Israel, Palestine and Yemen. Small firms are up to 50 employees.
+            Every lead belongs to one brand only, for good. Leads two brands cover are split evenly: GCC leads between Humans of Globe and Gulf Icons, US and European leads between Humans of Globe and CIO Minds. GCC = UAE, Saudi Arabia, Qatar, Kuwait, Bahrain, Oman. Small firms are up to 50 employees.
           </p>
           {settings && (
             <div className="table-wrap">

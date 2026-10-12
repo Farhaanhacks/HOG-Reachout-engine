@@ -97,13 +97,13 @@ describe('searchesFor', () => {
 });
 
 describe('createRun', () => {
-  it('takes turns by market, the Middle East, Europe and the US twice as often as Africa, and sizes the run to the target', async () => {
+  it('takes turns by market, the GCC, Europe and the US twice as often as Africa, and sizes the run to the target', async () => {
     const run = await createRun(db, { target: 120 });
     expect(run.queries).toHaveLength(24); // searches are free; lookups are what the target caps
     expect((await createRun(db, { target: 10 })).queries).toHaveLength(10);
-    expect(run.queries.slice(0, 7).map((q) => q.market)).toEqual(['me', 'eu', 'us', 'me', 'af', 'eu', 'us']);
+    expect(run.queries.slice(0, 7).map((q) => q.market)).toEqual(['gcc', 'eu', 'us', 'gcc', 'af', 'eu', 'us']);
     expect(run.queries.every((q) => q.page === 1 || run.queries.some((o) => o.key === q.key && o.market === q.market && o.page === q.page - 1))).toBe(true);
-    expect(run.brief).toEqual({ markets: ['me', 'eu', 'us', 'af'], target: 120 });
+    expect(run.brief).toEqual({ markets: ['gcc', 'eu', 'us', 'af'], target: 120 });
   });
 
   it('continues each search from the page earlier runs stopped at, and skips searches read to the end', async () => {
@@ -200,22 +200,21 @@ describe('runStep', () => {
     const country: Record<string, string> = { u: 'United Arab Emirates', s: 'United States', j: 'Jordan', n: 'Nigeria', x: 'Japan' };
     const people = Object.fromEntries(page.map((p) => [p.id, full(p.id, { country: country[p.id[0]] })]));
     const { svc } = fakeApollo(() => page, people);
-    const run = await createRun(db, { markets: ['me'], target: 50 });
+    const run = await createRun(db, { markets: ['gcc'], target: 50 });
     await runStep(svc, db, run.id, { dailyLimit: 600 });
     const rows = await db.query<{ apollo_person_id: string; brand: string; icp_fit: boolean }>('SELECT apollo_person_id, brand, icp_fit FROM people ORDER BY id');
     const brandsOf = (prefix: string) => rows.filter((r) => r.apollo_person_id.startsWith(prefix)).map((r) => r.brand).sort();
-    expect(brandsOf('u')).toEqual(['ciominds', 'ciominds', 'gulficons', 'gulficons', 'hog', 'hog']); // UAE: all three, two each
+    expect(brandsOf('u')).toEqual(['gulficons', 'gulficons', 'gulficons', 'hog', 'hog', 'hog']); // UAE: Humans of Globe or Gulf Icons, half each
     expect(brandsOf('s')).toEqual(['ciominds', 'hog']); // US: Humans of Globe or CIO Minds
-    expect(brandsOf('j')).toEqual(['gulficons', 'hog']); // Jordan: Humans of Globe or Gulf Icons
     expect(brandsOf('n')).toEqual(['hog']); // Africa: Humans of Globe only
-    expect(rows.find((r) => r.apollo_person_id === 'x1')).toMatchObject({ brand: 'none', icp_fit: false }); // outside every brand
+    for (const id of ['j1', 'j2', 'x1']) expect(rows.find((r) => r.apollo_person_id === id)).toMatchObject({ brand: 'none', icp_fit: false }); // Jordan, Japan: no brand
 
     // Seen again by a later search, a lead keeps its brand.
     const before = new Map(rows.map((r) => [r.apollo_person_id, r.brand]));
     const { saveApolloLead } = await import('../src/lib/run');
     const { DEFAULT_SETTINGS } = await import('../src/lib/settings');
     const { parseMatch } = await import('../src/lib/apollo');
-    for (const id of ['u1', 'u2', 'u3']) await saveApolloLead(db, parseMatch(people[id])!, 'me', DEFAULT_SETTINGS, 'again');
+    for (const id of ['u1', 'u2', 'u3']) await saveApolloLead(db, parseMatch(people[id])!, 'gcc', DEFAULT_SETTINGS, 'again');
     const after = await db.query<{ apollo_person_id: string; brand: string }>('SELECT apollo_person_id, brand FROM people');
     expect(after.every((r) => before.get(r.apollo_person_id) === r.brand)).toBe(true);
     expect(after).toHaveLength(rows.length); // nobody saved twice

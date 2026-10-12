@@ -80,20 +80,20 @@ describe('cleanRules and editions', () => {
 
 describe('markets', () => {
   it('places countries in their market and their news country', () => {
-    expect([marketOf('Nigeria'), marketOf('Germany'), marketOf('United States'), marketOf('United Arab Emirates'), marketOf('England'), marketOf('Japan'), marketOf('Egypt')]).toEqual(['af', 'eu', 'us', 'me', 'eu', null, 'me']);
+    expect([marketOf('Nigeria'), marketOf('Germany'), marketOf('United States'), marketOf('United Arab Emirates'), marketOf('England'), marketOf('Japan'), marketOf('Egypt')]).toEqual(['af', 'eu', 'us', 'gcc', 'eu', null, 'af']);
     expect([glForCountry('South Africa'), glForCountry('Kenya'), glForCountry('Atlantis')]).toEqual(['za', 'ke', 'us']);
   });
 });
 
 describe('brands', () => {
   it('gives each country the brands that cover it', () => {
-    expect(eligibleBrands('United Arab Emirates')).toEqual(['hog', 'gulficons', 'ciominds']);
-    expect(eligibleBrands('Saudi Arabia')).toEqual(['hog', 'gulficons', 'ciominds']);
-    expect(eligibleBrands('Jordan')).toEqual(['hog', 'gulficons']); // Middle East, not GCC
-    expect(eligibleBrands('Egypt')).toEqual(['hog', 'gulficons']);
+    expect(eligibleBrands('United Arab Emirates')).toEqual(['hog', 'gulficons']);
+    expect(eligibleBrands('Saudi Arabia')).toEqual(['hog', 'gulficons']);
     expect(eligibleBrands('United States')).toEqual(['hog', 'ciominds']);
     expect(eligibleBrands('Germany')).toEqual(['hog', 'ciominds']);
     expect(eligibleBrands('Nigeria')).toEqual(['hog']);
+    expect(eligibleBrands('Egypt')).toEqual(['hog']); // Africa
+    expect(eligibleBrands('Jordan')).toEqual([]); // outside the GCC: no brand
     expect(eligibleBrands('Japan')).toEqual([]);
   });
 
