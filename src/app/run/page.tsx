@@ -5,7 +5,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { RunBadge } from '../../components/badges';
 import { api, countryName, formatDate, personalizeWaiting, post } from '../../lib/client';
 import type { EnrichStatus } from '../../lib/enrich';
-import { MARKETS, MARKET_LIST, marketShort } from '../../lib/markets';
+import { BRANDS, BRAND_LIST } from '../../lib/brands';
+import { marketShort } from '../../lib/markets';
 import type { Run, StepSummary } from '../../lib/run';
 import type { Settings } from '../../lib/settings';
 import { SECTORS, SECTOR_LABEL } from '../../lib/targeting';
@@ -122,7 +123,7 @@ export default function RunPage() {
         <div>
           <h1>Find leads</h1>
           <p className="sub">
-            One click finds company leaders in Africa, Europe, the US and the UAE through Apollo. The title is picked by each company&apos;s size and industry, clients and anyone contacted before are skipped, and every lead comes with a verified email, website, LinkedIn, company size, industry and country.
+            One click finds company leaders for Humans of Globe, Gulf Icons and CIO Minds through Apollo, each lead going to one brand only. The title is picked by each company&apos;s size and industry, clients and anyone contacted before are skipped, and every lead comes with a verified email, website, LinkedIn, company size, industry and country.
           </p>
         </div>
       </div>
@@ -158,8 +159,18 @@ export default function RunPage() {
             <h2>Who we look for</h2>
             <Link href="/targeting" className="small">Change the rules</Link>
           </div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Brand</th><th>Sends from</th><th>Countries</th></tr></thead>
+              <tbody>
+                {BRAND_LIST.map((b) => (
+                  <tr key={b}><td><b>{BRANDS[b].label}</b></td><td className="small">@{BRANDS[b].domain}</td><td className="small">{BRANDS[b].regionLabel}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <p className="muted small">
-            Based in {MARKET_LIST.map((m) => MARKETS[m].label).join(', ')} (Africa and Europe searched twice as often). Small firms are up to 50 employees.
+            Every lead belongs to one brand only, for good. Leads more than one brand covers (a GCC CEO fits all three) are split evenly between them. Gulf = the six GCC countries; Middle East = the GCC plus Jordan, Lebanon, Iraq, Egypt, Turkey, Israel, Palestine and Yemen. Small firms are up to 50 employees.
           </p>
           {settings && (
             <div className="table-wrap">

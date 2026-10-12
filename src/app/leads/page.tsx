@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { CountryBadge, EmailBadge, FitBadge, PersonName, SizeBadge, SuppressedBadge } from '../../components/badges';
 import { api, formatDate, post } from '../../lib/client';
+import { BRANDS, BRAND_LIST, brandLabel } from '../../lib/brands';
 import { MARKETS, MARKET_LIST } from '../../lib/markets';
 import { draftEmail } from '../../lib/pitch';
 import type { Settings } from '../../lib/settings';
@@ -21,6 +22,7 @@ const linkParams = () => new URLSearchParams(typeof window === 'undefined' ? '' 
 
 export default function LeadsPage() {
   const [geo, setGeo] = useState('');
+  const [brand, setBrand] = useState(() => linkParams().get('brand') ?? '');
   // Showing emails means showing everyone who has one, not only the main person of each company.
   const [who, setWho] = useState<'top' | 'targets' | 'all'>('all');
   const [editions, setEditions] = useState<Edition[] | undefined>(undefined);
@@ -60,12 +62,13 @@ export default function LeadsPage() {
   const params = useMemo(() => {
     const p = new URLSearchParams();
     if (geo) p.set('geo', geo);
+    if (brand) p.set('brand', brand);
     if (who === 'top') p.set('top', '1');
     if (who === 'targets') p.set('targets', '1');
     if (ready) p.set('ready', '1');
     if (query) p.set('q', query);
     return p.toString();
-  }, [geo, who, ready, query]);
+  }, [geo, brand, who, ready, query]);
 
   useEffect(() => {
     let current = true; // ignore answers to filters the user has already changed
@@ -97,6 +100,10 @@ export default function LeadsPage() {
       <section className="card">
         <div className="row">
           <input id="leads-search" placeholder="Search name, title, company or industry" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: '1 1 260px' }} aria-label="Search" />
+          <select id="leads-brand" value={brand} onChange={(e) => setBrand(e.target.value)} aria-label="Brand">
+            <option value="">All brands</option>
+            {BRAND_LIST.map((b) => <option key={b} value={b}>{BRANDS[b].label}</option>)}
+          </select>
           <select id="leads-geo" value={geo} onChange={(e) => setGeo(e.target.value)} aria-label="Country">
             <option value="">All markets</option>
             {MARKET_LIST.map((g) => <option key={g} value={g}>{MARKETS[g].label}</option>)}
@@ -113,7 +120,7 @@ export default function LeadsPage() {
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Name</th><th>Title</th><th>Company</th><th>Industry</th><th>Country</th><th>Email</th><th>Found</th><th></th></tr>
+              <tr><th>Brand</th><th>Name</th><th>Title</th><th>Company</th><th>Industry</th><th>Country</th><th>Email</th><th>Found</th><th></th></tr>
             </thead>
             <tbody>
               {people?.map((p) => {
@@ -123,6 +130,7 @@ export default function LeadsPage() {
                 return (
                   <Fragment key={String(p.id)}>
                     <tr>
+                      <td className="small"><span className="badge accent">{brandLabel(p.brand)}</span></td>
                       <td><PersonName p={p} />{!p.linkedin_url && <div className="faint small">No LinkedIn on record</div>}</td>
                       <td>{p.title || <span className="muted">—</span>}<div><FitBadge fit={p.icp_fit} note={p.icp_note} title={p.target_title} /></div></td>
                       <td>
@@ -142,7 +150,7 @@ export default function LeadsPage() {
                     </tr>
                     {d && (
                       <tr>
-                        <td colSpan={8}>
+                        <td colSpan={9}>
                           <div className="draft">
                             {p.opener_status === 'done' && p.opener ? (
                               <p className="note small">Personalized{p.opener_fact ? ` from: ${p.opener_fact}` : ''}.</p>

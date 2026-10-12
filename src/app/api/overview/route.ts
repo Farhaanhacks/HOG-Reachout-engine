@@ -3,7 +3,7 @@ import { checkPassword } from '../../../lib/auth';
 import { getDb } from '../../../lib/db';
 import { dailyLimitFromEnv, enrichStatus } from '../../../lib/enrich';
 import { listRuns } from '../../../lib/run';
-import { countPeople, listPeople } from '../../../lib/store';
+import { countBrands, countPeople, listPeople } from '../../../lib/store';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,6 +15,7 @@ export async function GET(req: Request) {
     const db = getDb();
     return NextResponse.json({
       people: await countPeople(db),
+      brands: await countBrands(db),
       enrich: await enrichStatus(db, dailyLimitFromEnv()),
       runs: await listRuns(db, 6),
       latest: await listPeople(db, { topOnly: true, limit: 10 }),

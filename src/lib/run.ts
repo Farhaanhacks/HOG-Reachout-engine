@@ -2,6 +2,7 @@ import { bulkMatch, type ApolloMatch } from './apollo';
 import { MAX_PAGE, PER_PAGE, searchPeople, searchesFor, type SearchSpec } from './apollo-search';
 import { DEFAULT_DAILY_LIMIT, enrichStatus, runEnrichment, statusOf, type EnrichSummary } from './enrich';
 import { companyKey, emailDomain, linkedinKey, normDomain } from './keys';
+import { eligibleBrands, pickBrand } from './brands';
 import { MARKET_LIST, MARKET_TURNS, isMarket, marketOf, type Market } from './markets';
 import { tagTitle } from './seniority';
 import { getSettings, type Settings } from './settings';
@@ -144,7 +145,10 @@ export async function listRuns(db: Db, limit = 20): Promise<Run[]> {
 
 /** Saves one looked-up person with everything the brief asks for. Returns whether they are new and ready to email. */
 export async function saveApolloLead(db: Db, m: ApolloMatch, fallbackMarket: Market, settings: Settings, source: string): Promise<{ inserted: boolean; ready: boolean }> {
-  const check = checkLead({ title: m.title, industry: m.industry, employees: m.org?.employees ?? null }, settings.rules);
+  const rule = checkLead({ title: m.title, industry: m.industry, employees: m.org?.employees ?? null }, settings.rules);
+  // Someone based outside every brand's countries is saved but never emailed.
+  const covered = eligibleBrands(m.country).length > 0;
+  const check = covered ? rule : { ...rule, fit: false, reason: `Based in ${m.country || 'an unknown country'}, outside every brand's countries` };
   const edition = editionFor(m.industry, settings.editions);
   const linkedin = linkedinKey(m.linkedin) || null;
   const domain = normDomain(m.domain || m.website) || emailDomain(m.email);
@@ -169,14 +173,17 @@ export async function saveApolloLead(db: Db, m: ApolloMatch, fallbackMarket: Mar
     suppressed_reason = $27, company_key = $28, linkedin_key = $29, source_query = COALESCE(NULLIF(source_query, ''), $30), apollo_checked_at = now(),
     apollo_tier = 0, last_seen = now(), seen_count = seen_count + 1`;
   if (existing) {
+    // A lead keeps the brand it was first given, so no two brands ever contact the same person.
     await db.query(`UPDATE people SET ${set} WHERE id = $31`, [...values, existing.id]);
   } else {
+    const picked = await pickBrand(db, eligibleBrands(m.country));
     await db.query(
       `INSERT INTO people (apollo_person_id, linkedin_url, name, title, company, location, geo, labels, is_target, rank, email, email_status, apollo_status,
          apollo_confidence, company_employees, company_size, company_website, company_domain, industry, country, sector, firm_size, segment, target_title,
-         icp_fit, icp_note, suppressed_reason, company_key, linkedin_key, source_query, geo_match, apollo_checked_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, 'match', now())`,
-      values,
+         icp_fit, icp_note, suppressed_reason, company_key, linkedin_key, source_query, brand, brand_group, geo_match, apollo_checked_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
+         $31, $32, 'match', now())`,
+      [...values, picked?.brand ?? 'none', picked?.group ?? ''],
     );
   }
   return { inserted: !existing, ready: !!m.email && emailStatus === 'verified' && check.fit && !suppressed };

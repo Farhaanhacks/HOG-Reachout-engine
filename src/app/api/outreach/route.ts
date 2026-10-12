@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { findCustomFields, listSequences, missingFields, type Sequence } from '../../../lib/apollo-sequences';
 import { checkPassword } from '../../../lib/auth';
+import { BRANDS, BRAND_LIST, isBrand, type Brand } from '../../../lib/brands';
 import { getDb } from '../../../lib/db';
 import { syncMailboxes, type MailboxState } from '../../../lib/deliverability';
 import { fullEmail, heldBack, outreachDailyLimitFromEnv, outreachStatus, pendingOutreach, pushToApollo, sendTest, sendingRoom } from '../../../lib/outreach';
@@ -14,10 +15,12 @@ import { syncUnsubscribes } from '../../../lib/unsubscribe';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-/** Status, the Apollo sequences, the inboxes and today's room, the custom-field check, the template, and who was sent recently. Spends nothing. */
+/** For one brand (?brand=hog|gulficons|ciominds): status, sequences, its inboxes and today's room, the field check, the template, who was sent. Spends nothing. */
 export async function GET(req: Request) {
   const denied = checkPassword(req);
   if (denied) return denied;
+  const b = new URL(req.url).searchParams.get('brand');
+  const brand: Brand = isBrand(b) ? b : 'hog';
   const svc = { fetch, keys: keysFromEnv() };
   try {
     const db = getDb();
@@ -35,9 +38,11 @@ export async function GET(req: Request) {
       await syncUnsubscribes(svc, db).catch(() => 0);
     }
     const dailyLimit = outreachDailyLimitFromEnv();
-    const { room, inboxes } = await sendingRoom(db, dailyLimit, settings.emailsPerPerson);
-    const sent = (await listPeople(db, { limit: 1000 })).filter((p) => p.sequence_status).slice(0, 100);
+    const { room, inboxes } = await sendingRoom(db, dailyLimit, settings.emailsPerPerson, brand);
+    const sent = (await listPeople(db, { brand, limit: 1000 })).filter((p) => p.sequence_status).slice(0, 100);
     return NextResponse.json({
+      brand,
+      brands: BRAND_LIST.map((id) => ({ id, ...BRANDS[id] })),
       configured: !!svc.keys.apollo,
       aiConfigured: !!svc.keys.deepseek,
       defaultSequenceId: process.env.APOLLO_SEQUENCE_ID ?? '',
@@ -49,7 +54,7 @@ export async function GET(req: Request) {
       template: { ...sequenceTemplate(settings.unsubscribeStyle), html: settings.unsubscribeStyle === 'button' ? sequenceTemplateHtml() : '' },
       unsubscribeStyle: settings.unsubscribeStyle,
       apolloError,
-      status: await outreachStatus(db, dailyLimit),
+      status: await outreachStatus(db, dailyLimit, brand),
       held: await heldBack(db),
       sent,
     });
@@ -78,7 +83,9 @@ export async function POST(req: Request) {
     testEmail?: string;
     personId?: string;
     opener?: string;
+    brand?: string;
   };
+  const brand: Brand = isBrand(body.brand) ? body.brand : 'hog';
   const limit = Math.max(1, Math.min(Number(body.limit) || 25, 50));
   const svc = { fetch, keys: keysFromEnv() };
   try {
@@ -89,7 +96,7 @@ export async function POST(req: Request) {
     }
     if (body.action === 'personalize') {
       const summary = await personalizeNext(svc, db, Math.min(limit, 10));
-      return NextResponse.json({ summary, status: await outreachStatus(db, outreachDailyLimitFromEnv()) });
+      return NextResponse.json({ summary, status: await outreachStatus(db, outreachDailyLimitFromEnv(), brand) });
     }
     if (body.action === 'opener') {
       if (!body.personId) return NextResponse.json({ error: 'Send a personId.' }, { status: 400 });
@@ -98,13 +105,13 @@ export async function POST(req: Request) {
     }
     if (body.action === 'preview') {
       const { editions, unsubscribeStyle } = await getSettings(db);
-      const people = await pendingOutreach(db, limit);
+      const people = await pendingOutreach(db, limit, brand);
       return NextResponse.json({ people: people.map((p) => ({ ...p, preview: fullEmail(p, { editions, style: unsubscribeStyle }) })) });
     }
     if (body.action === 'push') {
       if (body.confirm !== true) return NextResponse.json({ error: 'Adding people to a sequence starts real emails: send confirm true.' }, { status: 400 });
-      const summary = await pushToApollo(svc, db, { sequenceId: String(body.sequenceId ?? ''), limit, dailyLimit: outreachDailyLimitFromEnv() });
-      return NextResponse.json({ summary, status: await outreachStatus(db, outreachDailyLimitFromEnv()) });
+      const summary = await pushToApollo(svc, db, { sequenceId: String(body.sequenceId ?? ''), limit, dailyLimit: outreachDailyLimitFromEnv(), brand });
+      return NextResponse.json({ summary, status: await outreachStatus(db, outreachDailyLimitFromEnv(), brand) });
     }
     if (body.action === 'test') {
       return NextResponse.json(
@@ -113,6 +120,7 @@ export async function POST(req: Request) {
           emailAccountId: body.emailAccountId || undefined,
           testEmail: String(body.testEmail ?? '').trim(),
           personId: body.personId || undefined,
+          brand,
         }),
       );
     }

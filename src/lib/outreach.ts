@@ -1,4 +1,5 @@
 import { addToSequence, createContact, findCustomFields, missingFields, skipReason, type ApolloContactInput, type FieldIds } from './apollo-sequences';
+import { BRANDS, brandOfEmail, type Brand } from './brands';
 import { allocate, autoPause, mailboxStates, syncMailboxes, type MailboxState } from './deliverability';
 import { fallbackOpener, personalizeNext } from './personalize';
 import { draftEmail, unsubscribeLine, type UnsubscribeStyle } from './pitch';
@@ -78,17 +79,22 @@ async function requireFields(svc: Services): Promise<FieldIds> {
 }
 
 /**
- * Who goes to Apollo next: people who can be emailed (verified email, target title, not suppressed or unsubscribed) with
- * a personal opener, not sent yet; main people first, then in the order they were found.
+ * Who goes to Apollo next for a brand: its people who can be emailed (verified email, target title, not suppressed or
+ * unsubscribed) with a personal opener, not sent yet; main people first, then in the order they were found.
  */
-export async function pendingOutreach(db: Db, limit: number): Promise<SavedPerson[]> {
+export async function pendingOutreach(db: Db, limit: number, brand: Brand = 'hog'): Promise<SavedPerson[]> {
   await ensureSchema(db);
   return db.query<SavedPerson>(
     `SELECT ${PERSON_COLUMNS} FROM people
-     WHERE ${READY_SQL} AND sequence_status = '' AND opener_status = 'done' AND opener <> ''
+     WHERE ${READY_SQL} AND brand = $2 AND sequence_status = '' AND opener_status = 'done' AND opener <> ''
      ORDER BY COALESCE(rank, 3) ASC, apollo_checked_at ASC NULLS LAST, id ASC LIMIT $1`,
-    [Math.max(1, Math.min(limit, 1000))],
+    [Math.max(1, Math.min(limit, 1000)), brand],
   );
+}
+
+/** A brand's own inboxes: those on its domain. Every other inbox is left out, so a lead only hears from its own brand. */
+export function brandInboxes(inboxes: MailboxState[], brand: Brand): MailboxState[] {
+  return inboxes.filter((s) => brandOfEmail(s.email) === brand);
 }
 
 export type OutreachStatus = {
@@ -107,7 +113,8 @@ export type OutreachStatus = {
   dailyLimit: number;
 };
 
-export async function outreachStatus(db: Db, dailyLimit = DEFAULT_OUTREACH_DAILY_LIMIT): Promise<OutreachStatus> {
+/** Counts for one brand's leads (or every lead without a brand). The daily cap is shared by all brands. */
+export async function outreachStatus(db: Db, dailyLimit = DEFAULT_OUTREACH_DAILY_LIMIT, brand?: Brand): Promise<OutreachStatus> {
   await ensureSchema(db);
   const unsent = `${READY_SQL} AND sequence_status = ''`;
   const [p] = await db.query<{ waiting: number; to_personalize: number; sent: number; skipped: number; unsubscribed: number; not_sendable: number; suppressed: number }>(
@@ -118,7 +125,8 @@ export async function outreachStatus(db: Db, dailyLimit = DEFAULT_OUTREACH_DAILY
             count(*) FILTER (WHERE unsubscribed_at IS NOT NULL)::int AS unsubscribed,
             count(*) FILTER (WHERE email <> '' AND (email_status <> 'verified' OR icp_fit = FALSE))::int AS not_sendable,
             count(*) FILTER (WHERE email <> '' AND suppressed_reason <> '')::int AS suppressed
-     FROM people`,
+     FROM people ${brand ? 'WHERE brand = $1' : ''}`,
+    brand ? [brand] : [],
   );
   const [t] = await db.query<{ n: number }>(`SELECT coalesce(sum(requested), 0)::int AS n FROM outreach_log WHERE ran_at >= date_trunc('day', now())`);
   return {
@@ -151,10 +159,10 @@ export type PushSummary = {
   stopped?: string;
 };
 
-/** Room left today: the overall daily cap, and each inbox's own (warm-up) limit. */
-export async function sendingRoom(db: Db, dailyLimit: number, emailsPerPerson: number): Promise<{ room: number; inboxes: MailboxState[] }> {
+/** Room left today for a brand: the overall daily cap, and each of the brand's own inboxes' (warm-up) limit. */
+export async function sendingRoom(db: Db, dailyLimit: number, emailsPerPerson: number, brand: Brand = 'hog'): Promise<{ room: number; inboxes: MailboxState[] }> {
   const status = await outreachStatus(db, dailyLimit);
-  const inboxes = await mailboxStates(db, emailsPerPerson);
+  const inboxes = brandInboxes(await mailboxStates(db, emailsPerPerson), brand);
   const inboxRoom = inboxes.reduce((n, s) => n + s.room, 0);
   return { room: Math.max(0, Math.min(dailyLimit - status.sentToday, inboxRoom)), inboxes };
 }
@@ -162,10 +170,11 @@ export async function sendingRoom(db: Db, dailyLimit: number, emailsPerPerson: n
 /**
  * Sends the next people with a personalized email ready into an Apollo sequence. First the inbox list is refreshed from
  * Apollo and, if the last check is over half an hour old, bounces and spam blocks are read and any inbox over the limits
- * is paused. Then each person is created as an Apollo contact (their personal parts in custom fields) and given to an
- * inbox: the inboxes take turns across both domains, each within its warm-up limit for today.
+ * is paused. Then each of the brand's people is created as an Apollo contact (their personal parts in custom fields) and
+ * given to one of the brand's own inboxes: they take turns, each within its warm-up limit for today.
  */
-export async function pushToApollo(svc: Services, db: Db, opts: { sequenceId: string; limit: number; dailyLimit?: number }): Promise<PushSummary> {
+export async function pushToApollo(svc: Services, db: Db, opts: { sequenceId: string; limit: number; dailyLimit?: number; brand?: Brand }): Promise<PushSummary> {
+  const brand = opts.brand ?? 'hog';
   if (!opts.sequenceId) throw new Error('Choose an Apollo sequence first.');
   const fields = await requireFields(svc);
   const settings = await getSettings(db);
@@ -176,13 +185,15 @@ export async function pushToApollo(svc: Services, db: Db, opts: { sequenceId: st
   await syncIfStale(svc, db, 30 * 60_000, 15_000).catch(() => null);
   summary.paused = await autoPause(db, settings.emailsPerPerson);
 
-  const { room, inboxes } = await sendingRoom(db, dailyLimit, settings.emailsPerPerson);
-  if (!inboxes.some((s) => s.usable)) return { ...summary, stopped: 'No inbox can send: connect inboxes in Apollo, or resume a paused one on the Deliverability page' };
+  const { room, inboxes } = await sendingRoom(db, dailyLimit, settings.emailsPerPerson, brand);
+  if (!inboxes.some((s) => s.usable)) {
+    return { ...summary, stopped: `No ${BRANDS[brand].label} inbox (@${BRANDS[brand].domain}) can send: connect one in Apollo, or turn one on or resume it on the Deliverability page` };
+  }
   if (room <= 0) return { ...summary, stopped: "Today's sending limit is used up across all inboxes (their warm-up limits and the daily cap). More can go tomorrow" };
   // Safety net: the pages normally personalize earlier.
-  const status = await outreachStatus(db, dailyLimit);
+  const status = await outreachStatus(db, dailyLimit, brand);
   if (svc.keys.deepseek && status.toPersonalize > 0) await personalizeNext(svc, db, Math.min(opts.limit, room, 10)).catch(() => undefined);
-  const people = await pendingOutreach(db, Math.min(opts.limit, room, BATCH));
+  const people = await pendingOutreach(db, Math.min(opts.limit, room, BATCH), brand);
   if (!people.length) return summary;
 
   const contacts = await mapLimit(people, 4, async (p) => {
@@ -268,23 +279,32 @@ export function testAddress(email: string, tag: string = Date.now().toString(36)
  * the real person's company as already in the sequence, and an unsubscribe link that unsubscribes nobody. The real
  * person is not contacted or marked.
  */
-export async function sendTest(svc: Services, db: Db, opts: { sequenceId: string; emailAccountId?: string; testEmail: string; personId?: number | string }): Promise<{ added: boolean; reason?: string; from: string; to: string }> {
+export async function sendTest(
+  svc: Services,
+  db: Db,
+  opts: { sequenceId: string; emailAccountId?: string; testEmail: string; personId?: number | string; brand?: Brand },
+): Promise<{ added: boolean; reason?: string; from: string; to: string }> {
+  const brand = opts.brand ?? 'hog';
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(opts.testEmail)) throw new Error('Enter a valid test email address.');
   if (!opts.sequenceId) throw new Error('Choose an Apollo sequence first.');
   const fields = await requireFields(svc);
   const settings = await getSettings(db);
   await syncMailboxes(svc, db);
-  const inboxes = await mailboxStates(db, settings.emailsPerPerson);
+  // Tests send from the brand's own inboxes too.
+  const inboxes = brandInboxes(await mailboxStates(db, settings.emailsPerPerson), brand);
   const inbox = inboxes.find((s) => s.id === opts.emailAccountId) ?? inboxes.find((s) => s.usable) ?? inboxes.find((s) => s.apollo_active);
-  if (!inbox) throw new Error('No inbox is connected in Apollo yet. Connect one under Settings, Mailboxes.');
+  if (!inbox) throw new Error(`No ${BRANDS[brand].label} inbox (@${BRANDS[brand].domain}) is connected in Apollo yet.`);
   const [person] = opts.personId
     ? await db.query<SavedPerson>(`SELECT ${PERSON_COLUMNS} FROM people WHERE id = $1`, [opts.personId])
-    : await db.query<SavedPerson>(`SELECT ${PERSON_COLUMNS} FROM people WHERE ${READY_SQL} ORDER BY (opener_status = 'done') DESC, COALESCE(rank, 3), id LIMIT 1`);
+    : await db.query<SavedPerson>(
+        `SELECT ${PERSON_COLUMNS} FROM people WHERE ${READY_SQL} ORDER BY (brand = $1) DESC, (opener_status = 'done') DESC, COALESCE(rank, 3), id LIMIT 1`,
+        [brand],
+      );
   const sample: ContactSource = person ?? { id: TEST_ID, name: 'Test Person', title: 'CEO', company: 'Example Company', email: '', opener: '' };
   const to = testAddress(opts.testEmail);
   const contactId = await createContact(
     svc,
-    toApolloContact({ ...sample, email: to }, fields, { unsubscribeId: TEST_ID, organizationName: 'Humans of Globe (test)', editions: settings.editions }),
+    toApolloContact({ ...sample, email: to }, fields, { unsubscribeId: TEST_ID, organizationName: `${BRANDS[brand].label} (test)`, editions: settings.editions }),
     { dedupe: false },
   );
   const res = await addToSequence(svc, opts.sequenceId, [contactId], inbox.id, { allowUnverified: true });

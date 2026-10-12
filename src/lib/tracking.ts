@@ -199,7 +199,8 @@ const METRICS_SQL = `count(DISTINCT p.id) FILTER (WHERE m.completed_at IS NOT NU
 export const GROUPS = {
   segment: { label: 'Segment', sql: "COALESCE(NULLIF(p.segment, ''), 'Earlier leads')" },
   size: { label: 'Company size', sql: "CASE p.firm_size WHEN 'small' THEN 'Small (up to 50)' WHEN 'large' THEN 'Large (51+)' ELSE 'Unknown' END" },
-  market: { label: 'Market', sql: "CASE p.geo WHEN 'af' THEN 'Africa' WHEN 'eu' THEN 'Europe' WHEN 'us' THEN 'US' WHEN 'ae' THEN 'UAE' WHEN 'uk' THEN 'UK' WHEN 'ca' THEN 'Canada' ELSE p.geo END" },
+  brand: { label: 'Brand', sql: "CASE p.brand WHEN 'hog' THEN 'Humans of Globe' WHEN 'gulficons' THEN 'Gulf Icons' WHEN 'ciominds' THEN 'CIO Minds' ELSE 'None' END" },
+  market: { label: 'Market', sql: "CASE p.geo WHEN 'af' THEN 'Africa' WHEN 'eu' THEN 'Europe' WHEN 'us' THEN 'US' WHEN 'me' THEN 'Middle East' WHEN 'ae' THEN 'UAE' WHEN 'uk' THEN 'UK' WHEN 'ca' THEN 'Canada' ELSE p.geo END" },
   country: { label: 'Country', sql: "COALESCE(NULLIF(p.country, ''), 'Unknown')" },
   title: { label: 'Target title', sql: "COALESCE(NULLIF(p.target_title, ''), NULLIF(p.title, ''), 'Unknown')" },
   sector: { label: 'Title rules used', sql: "CASE p.sector WHEN 'healthcare' THEN 'Healthcare' WHEN 'hospitality' THEN 'Hospitality' WHEN 'general' THEN 'Other industries' ELSE 'Earlier leads' END" },

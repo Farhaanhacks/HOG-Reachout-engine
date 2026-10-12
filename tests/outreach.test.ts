@@ -18,14 +18,14 @@ const FIELDS = [
 ];
 const fieldIds = { subject: 'f-subject', opener: 'f-opener', unsubscribe: 'f-unsub', edition: 'f-edition', industry: 'f-industry' };
 
-/** Six inboxes on two domains, like the team's. */
+/** Inboxes for the three brands, like the team's. */
 const ACCOUNTS = [
-  { id: 'a1', email: 'ava@hog-one.com', active: true },
-  { id: 'a2', email: 'ben@hog-one.com', active: true },
-  { id: 'a3', email: 'cat@hog-one.com', active: true },
-  { id: 'b1', email: 'dan@hog-two.com', active: true },
-  { id: 'b2', email: 'eve@hog-two.com', active: true },
-  { id: 'b3', email: 'fay@hog-two.com', active: true },
+  { id: 'a1', email: 'ava@humansofglobe.com', active: true },
+  { id: 'a2', email: 'ben@humansofglobe.com', active: true },
+  { id: 'a3', email: 'cat@humansofglobe.com', active: true },
+  { id: 'b1', email: 'dan@gulficons.com', active: true },
+  { id: 'b2', email: 'eve@gulficons.com', active: true },
+  { id: 'c1', email: 'fay@ciominds.com', active: true },
 ];
 
 type ContactBody = { email: string; first_name?: string; last_name?: string; organization_name?: string; title?: string; label_names: string[]; typed_custom_fields: Record<string, string>; run_dedupe: boolean };
@@ -219,14 +219,27 @@ describe('pushToApollo', () => {
     expect((await push(svc)).requested).toBe(0); // nobody twice
   });
 
-  it('takes turns across the inboxes, switching domain each time, and records who sent to whom', async () => {
+  it("takes turns across the brand's own inboxes only, and records who sent to whom", async () => {
     await seed({ a: {}, b: {}, c: {}, d: {} });
     const { svc, adds } = fakeApollo();
     const summary = await push(svc);
-    expect(adds.map((a) => a.get('send_email_from_email_account_id'))).toEqual(['a1', 'b1', 'a2', 'b2']);
-    expect(Object.keys(summary.byInbox).sort()).toEqual(['ava@hog-one.com', 'ben@hog-one.com', 'dan@hog-two.com', 'eve@hog-two.com']);
-    const senders = await db.query<{ sent_from_email: string }>("SELECT sent_from_email FROM people WHERE sequence_status = 'added' ORDER BY sent_from_email");
-    expect(senders.map((s) => s.sent_from_email.split('@')[1])).toEqual(['hog-one.com', 'hog-one.com', 'hog-two.com', 'hog-two.com']);
+    expect(adds.map((a) => a.get('send_email_from_email_account_id'))).toEqual(['a1', 'a2', 'a3']);
+    expect(adds.map((a) => a.getAll('contact_ids[]').length)).toEqual([2, 1, 1]);
+    expect(Object.keys(summary.byInbox).sort()).toEqual(['ava@humansofglobe.com', 'ben@humansofglobe.com', 'cat@humansofglobe.com']);
+    const senders = await db.query<{ sent_from_email: string }>("SELECT sent_from_email FROM people WHERE sequence_status = 'added'");
+    expect(senders.every((s) => s.sent_from_email.endsWith('@humansofglobe.com'))).toBe(true);
+  });
+
+  it("sends each brand's leads only from that brand's inboxes, and never another brand's leads", async () => {
+    await seed({ h: {}, g1: {}, g2: {}, c: {} });
+    await db.query("UPDATE people SET brand = 'gulficons' WHERE linkedin_url LIKE '%/g_'");
+    await db.query("UPDATE people SET brand = 'ciominds' WHERE linkedin_url LIKE '%/c'");
+    const { svc, contacts, adds } = fakeApollo();
+    await pushToApollo(svc, db, { sequenceId: 'seq-gulf', limit: 25, brand: 'gulficons' });
+    expect(contacts.map((c) => c.email).sort()).toEqual(['g1@g1co.com', 'g2@g2co.com']);
+    expect(adds.map((a) => a.get('send_email_from_email_account_id')).sort()).toEqual(['b1', 'b2']);
+    expect(await outreachStatus(db, 500, 'hog')).toMatchObject({ waiting: 1 });
+    expect(await outreachStatus(db, 500, 'ciominds')).toMatchObject({ waiting: 1 });
   });
 
   it('keeps each inbox within its warm-up limit for the day', async () => {
@@ -257,11 +270,11 @@ describe('pushToApollo', () => {
   it('pauses an inbox whose emails bounce, before giving it anyone new', async () => {
     await seed({ a: {}, b: {} });
     // ava@hog-one.com: 30 emails sent, 3 bounced (10%).
-    const messages = Array.from({ length: 30 }, (_, i) => ({ id: `m${i}`, email_account_id: 'a1', from_email: 'ava@hog-one.com', completed_at: new Date().toISOString(), bounce: i < 3 }));
+    const messages = Array.from({ length: 30 }, (_, i) => ({ id: `m${i}`, email_account_id: 'a1', from_email: 'ava@humansofglobe.com', completed_at: new Date().toISOString(), bounce: i < 3 }));
     await db.query("UPDATE people SET apollo_sequence_id = 'seq-1' WHERE linkedin_url LIKE '%/b'");
     const { svc, adds } = fakeApollo({ messages, accounts: ACCOUNTS.slice(0, 2) });
     const summary = await push(svc);
-    expect(summary.paused).toEqual([{ email: 'ava@hog-one.com', reason: expect.stringContaining('10.0% bounced') }]);
+    expect(summary.paused).toEqual([{ email: 'ava@humansofglobe.com', reason: expect.stringContaining('10.0% bounced') }]);
     expect(adds.map((a) => a.get('send_email_from_email_account_id'))).toEqual(['a2']);
   });
 
@@ -297,7 +310,9 @@ describe('pushToApollo', () => {
   it('needs a sequence and an inbox', async () => {
     await seed({ a: {} });
     await expect(pushToApollo(fakeApollo().svc, db, { sequenceId: '', limit: 1 })).rejects.toThrow('Choose an Apollo sequence first.');
-    expect(await push(fakeApollo({ accounts: [] }).svc)).toMatchObject({ requested: 0, stopped: expect.stringContaining('No inbox can send') });
+    expect(await push(fakeApollo({ accounts: [] }).svc)).toMatchObject({ requested: 0, stopped: expect.stringContaining('No Humans of Globe inbox') });
+    // Another brand's inboxes never stand in for missing ones.
+    expect(await push(fakeApollo({ accounts: ACCOUNTS.slice(3) }).svc)).toMatchObject({ requested: 0, stopped: expect.stringContaining('No Humans of Globe inbox') });
   });
 });
 
@@ -305,7 +320,7 @@ describe('sendTest', () => {
   it("sends a real lead's personalized email to the test address without touching the lead", async () => {
     await seed({ a: {} });
     const { svc, contacts, adds } = fakeApollo();
-    expect(await sendTest(svc, db, { sequenceId: 'seq-1', emailAccountId: 'b2', testEmail: 'me@team.com' })).toEqual({ added: true, reason: undefined, from: 'eve@hog-two.com', to: 'me@team.com' });
+    expect(await sendTest(svc, db, { sequenceId: 'seq-1', emailAccountId: 'a2', testEmail: 'me@team.com' })).toEqual({ added: true, reason: undefined, from: 'ben@humansofglobe.com', to: 'me@team.com' });
     expect(contacts[0]).toMatchObject({ email: 'me@team.com', first_name: 'A', organization_name: 'Humans of Globe (test)' });
     expect(contacts[0].typed_custom_fields['f-unsub']).toBe(unsubscribeUrl(TEST_ID));
     expect(adds[0].getAll('contact_ids[]')).toEqual(['c-me@team.com']);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { companyKey, emailDomain, entriesFor, linkedinKey, normDomain } from '../src/lib/suppression';
 import { DEFAULT_RULES, checkLead, cleanRules, editionFor, firmSize, matchTitle, sectorOf } from '../src/lib/targeting';
+import { brandOfEmail, eligibleBrands } from '../src/lib/brands';
 import { glForCountry, marketOf } from '../src/lib/markets';
 
 describe('matchTitle', () => {
@@ -79,8 +80,25 @@ describe('cleanRules and editions', () => {
 
 describe('markets', () => {
   it('places countries in their market and their news country', () => {
-    expect([marketOf('Nigeria'), marketOf('Germany'), marketOf('United States'), marketOf('United Arab Emirates'), marketOf('England'), marketOf('Japan')]).toEqual(['af', 'eu', 'us', 'ae', 'eu', null]);
+    expect([marketOf('Nigeria'), marketOf('Germany'), marketOf('United States'), marketOf('United Arab Emirates'), marketOf('England'), marketOf('Japan'), marketOf('Egypt')]).toEqual(['af', 'eu', 'us', 'me', 'eu', null, 'me']);
     expect([glForCountry('South Africa'), glForCountry('Kenya'), glForCountry('Atlantis')]).toEqual(['za', 'ke', 'us']);
+  });
+});
+
+describe('brands', () => {
+  it('gives each country the brands that cover it', () => {
+    expect(eligibleBrands('United Arab Emirates')).toEqual(['hog', 'gulficons', 'ciominds']);
+    expect(eligibleBrands('Saudi Arabia')).toEqual(['hog', 'gulficons', 'ciominds']);
+    expect(eligibleBrands('Jordan')).toEqual(['hog', 'gulficons']); // Middle East, not GCC
+    expect(eligibleBrands('Egypt')).toEqual(['hog', 'gulficons']);
+    expect(eligibleBrands('United States')).toEqual(['hog', 'ciominds']);
+    expect(eligibleBrands('Germany')).toEqual(['hog', 'ciominds']);
+    expect(eligibleBrands('Nigeria')).toEqual(['hog']);
+    expect(eligibleBrands('Japan')).toEqual([]);
+  });
+
+  it('knows which brand an inbox sends for', () => {
+    expect([brandOfEmail('aisha@gulficons.com'), brandOfEmail('alice@HumansofGlobe.com'), brandOfEmail('anam@ciominds.com'), brandOfEmail('x@gmail.com')]).toEqual(['gulficons', 'hog', 'ciominds', null]);
   });
 });
 

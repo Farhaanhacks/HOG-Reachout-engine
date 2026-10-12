@@ -1,3 +1,4 @@
+import { isBrand } from './brands';
 import { isGeo } from './geo';
 import { isMarket } from './markets';
 import type { ListOptions } from './store';
@@ -7,6 +8,7 @@ export function filtersFrom(url: URL): ListOptions {
   const geo = url.searchParams.get('geo') ?? '';
   return {
     geo: isGeo(geo) || isMarket(geo) ? geo : undefined,
+    brand: isBrand(url.searchParams.get('brand')) ? (url.searchParams.get('brand') as string) : undefined,
     targetOnly: url.searchParams.get('targets') === '1',
     ready: url.searchParams.get('ready') === '1',
     topOnly: url.searchParams.get('top') === '1',

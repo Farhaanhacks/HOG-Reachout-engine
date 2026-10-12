@@ -6,11 +6,15 @@ import { EmailBadge, PersonName } from '../../components/badges';
 import type { Sequence } from '../../lib/apollo-sequences';
 import { api, formatDate, personalizeWaiting, post } from '../../lib/client';
 import type { OutreachStatus, PushSummary } from '../../lib/outreach';
+import type { Brand } from '../../lib/brands';
 import { CUSTOM_FIELDS, unsubscribeButtonHtml, type UnsubscribeStyle } from '../../lib/pitch';
 import type { SavedPerson } from '../../lib/store';
 
 type Inbox = { id: string; email: string; domain: string; usable: boolean; room: number; newToday: number; addedToday: number; paused: string };
+type BrandInfo = { id: Brand; label: string; domain: string; regionLabel: string };
 type Overview = {
+  brand: Brand;
+  brands: BrandInfo[];
   configured: boolean;
   aiConfigured: boolean;
   defaultSequenceId: string;
@@ -28,7 +32,9 @@ type Overview = {
 };
 type Preview = SavedPerson & { preview: { subject: string; body: string } };
 
-const SEQUENCE_KEY = 'hog-apollo-sequence';
+const BRAND_KEY = 'hog-outreach-brand';
+/** Each brand has its own sequence (its own template and wording), remembered separately. */
+const sequenceKey = (brand: string) => `hog-apollo-sequence-${brand}`;
 
 const STYLES: { id: UnsubscribeStyle; label: string; hint: string }[] = [
   { id: 'button', label: 'Unsubscribe button', hint: 'A real button at the bottom of every email, opening their own unsubscribe page' },
@@ -52,6 +58,7 @@ const remember = (key: string, value: string) => {
 
 export default function OutreachPage() {
   const [data, setData] = useState<Overview | null>(null);
+  const [brand, setBrand] = useState<Brand>(() => (remembered(BRAND_KEY) as Brand) || 'hog');
   const [sequenceId, setSequenceId] = useState('');
   const [testInbox, setTestInbox] = useState('');
   const [limit, setLimit] = useState(25);
@@ -67,11 +74,23 @@ export default function OutreachPage() {
   const autoStarted = useRef(false);
 
   const load = useCallback(async () => {
-    const d = await api<Overview>('/api/outreach');
+    const d = await api<Overview>(`/api/outreach?brand=${brand}`);
     setData(d);
     const seqIds = d.sequences.map((s) => s.id);
-    setSequenceId((current) => current || [remembered(SEQUENCE_KEY), d.defaultSequenceId].find((id) => id && seqIds.includes(id)) || '');
-  }, []);
+    setSequenceId((current) => current || [remembered(sequenceKey(d.brand)), d.brand === 'hog' ? d.defaultSequenceId : ''].find((id) => id && seqIds.includes(id)) || '');
+  }, [brand]);
+
+  function switchBrand(next: Brand) {
+    if (next === brand) return;
+    remember(BRAND_KEY, next);
+    setBrand(next);
+    setData(null);
+    setSequenceId('');
+    setTestInbox('');
+    setPreview(null);
+    setSummary(null);
+    setTestResult('');
+  }
 
   useEffect(() => {
     load().catch((e: Error) => setError(e.message));
@@ -108,13 +127,13 @@ export default function OutreachPage() {
   const doPreview = () =>
     act(async () => {
       setSummary(null);
-      const d = await api<{ people: Preview[] }>('/api/outreach', post({ action: 'preview', limit }));
+      const d = await api<{ people: Preview[] }>('/api/outreach', post({ action: 'preview', limit, brand }));
       setPreview(d.people);
     });
 
   const doPush = () =>
     act(async () => {
-      const d = await api<{ summary: PushSummary }>('/api/outreach', post({ action: 'push', limit, sequenceId, confirm: true }));
+      const d = await api<{ summary: PushSummary }>('/api/outreach', post({ action: 'push', limit, sequenceId, confirm: true, brand }));
       setSummary(d.summary);
       setPreview(null);
       await load();
@@ -127,7 +146,7 @@ export default function OutreachPage() {
       const total: PushSummary = { requested: 0, added: 0, skipped: 0, failed: 0, reasons: {}, byInbox: {}, paused: [] };
       for (let i = 0; i < 40; i++) {
         setProgress(`Sending… ${total.added} added so far.`);
-        const d = await api<{ summary: PushSummary }>('/api/outreach', post({ action: 'push', limit: 25, sequenceId, confirm: true }));
+        const d = await api<{ summary: PushSummary }>('/api/outreach', post({ action: 'push', limit: 25, sequenceId, confirm: true, brand }));
         const s = d.summary;
         total.requested += s.requested;
         total.added += s.added;
@@ -148,7 +167,7 @@ export default function OutreachPage() {
   const doTest = () =>
     act(async () => {
       setTestResult('');
-      const d = await api<{ added: boolean; reason?: string; from: string; to: string }>('/api/outreach', post({ action: 'test', sequenceId, emailAccountId: testInbox, testEmail }));
+      const d = await api<{ added: boolean; reason?: string; from: string; to: string }>('/api/outreach', post({ action: 'test', sequenceId, emailAccountId: testInbox, testEmail, brand }));
       setTestResult(
         d.added
           ? `Added ${d.to} to the sequence with a real personalized email, sending from ${d.from}. It arrives in your ${testEmail} inbox when the sequence's first step sends (its delay and sending hours apply).`
@@ -190,8 +209,21 @@ export default function OutreachPage() {
       <div className="page-head">
         <div>
           <h1>Outreach (Apollo)</h1>
-          <p className="sub">Every email opens with something specific about that person, names their edition, and ends with a working unsubscribe link. Only verified emails are sent. People are spread across all your inboxes and both domains, each within its warm-up limit, and Apollo sends, paces and stops on reply.</p>
+          <p className="sub">Each brand sends only its own leads, from its own domain&apos;s inboxes, through its own sequence. Every email opens with something specific about that person and ends with a working unsubscribe. Only verified emails are sent, each inbox within its warm-up limit.</p>
         </div>
+      </div>
+
+      <div className="segmented" role="radiogroup" aria-label="Brand">
+        {(data?.brands ?? [
+          { id: 'hog', label: 'Humans of Globe', domain: 'humansofglobe.com', regionLabel: '' },
+          { id: 'gulficons', label: 'Gulf Icons', domain: 'gulficons.com', regionLabel: '' },
+          { id: 'ciominds', label: 'CIO Minds', domain: 'ciominds.com', regionLabel: '' },
+        ]).map((b) => (
+          <button key={b.id} role="radio" aria-checked={brand === b.id} className={brand === b.id ? 'on' : ''} onClick={() => switchBrand(b.id as Brand)} disabled={busy}>
+            <b>{b.label}</b>
+            <span>@{b.domain}{b.regionLabel ? ` · ${b.regionLabel}` : ''}</span>
+          </button>
+        ))}
       </div>
 
       {error && <p className="alert" role="alert">{error}</p>}
@@ -217,7 +249,7 @@ export default function OutreachPage() {
           )}
           <label className="field">
             Sequence
-            <select id="outreach-sequence" value={sequenceId} onChange={(e) => { setSequenceId(e.target.value); remember(SEQUENCE_KEY, e.target.value); }} disabled={busy}>
+            <select id="outreach-sequence" value={sequenceId} onChange={(e) => { setSequenceId(e.target.value); remember(sequenceKey(brand), e.target.value); }} disabled={busy}>
               <option value="">Choose a sequence</option>
               {data?.sequences.map((s) => <option key={s.id} value={s.id}>{s.name}{s.active ? '' : ' (not active)'}</option>)}
             </select>

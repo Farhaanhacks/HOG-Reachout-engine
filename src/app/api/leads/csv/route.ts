@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { checkPassword } from '../../../../lib/auth';
 import { toCsv } from '../../../../lib/csv';
 import { getDb } from '../../../../lib/db';
+import { brandLabel } from '../../../../lib/brands';
 import { marketShort } from '../../../../lib/markets';
 import { filtersFrom } from '../../../../lib/lead-filters';
 import { draftEmail, unsubscribeLine } from '../../../../lib/pitch';
@@ -22,7 +23,7 @@ export async function GET(req: Request) {
     const people = await listPeople(db, { ...filtersFrom(new URL(req.url)), limit: 1000 });
     const csv = toCsv(
       [
-        'Name', 'First name', 'Designation', 'Company', 'Company website', 'LinkedIn', 'Email', 'Email status', 'Employees', 'Company size', 'Industry',
+        'Brand', 'Name', 'First name', 'Designation', 'Company', 'Company website', 'LinkedIn', 'Email', 'Email status', 'Employees', 'Company size', 'Industry',
         'Country', 'Market', 'Target title', 'Fits the title rules', 'Segment', 'Edition', 'Suppressed', 'Sent from', 'Personal opener', 'Email subject',
         'Email body', 'Unsubscribe link', 'Unsubscribed', 'First seen',
       ],
@@ -30,7 +31,7 @@ export async function GET(req: Request) {
         const e = editionFor(p.industry, editions);
         const d = draftEmail({ ...p, edition: e.edition, industryLine: e.industryLine });
         return [
-          p.name, d.firstName, p.title, p.company, p.company_website ?? '', p.linkedin_url ?? '', p.email, p.email_status, p.company_employees ?? '',
+          brandLabel(p.brand), p.name, d.firstName, p.title, p.company, p.company_website ?? '', p.linkedin_url ?? '', p.email, p.email_status, p.company_employees ?? '',
           p.firm_size || p.company_size, p.industry ?? '', p.country || p.location, marketShort(p.geo), p.target_title ?? '',
           p.icp_fit === false ? 'no' : p.icp_fit ? 'yes' : '', p.segment ?? '', e.edition, p.suppressed_reason ?? '', p.sent_from_email ?? '', p.opener ?? '',
           d.subject, `${d.body}\n\n${unsubscribeLine(unsubscribeStyle, unsubscribeUrl(p.id))}`, unsubscribeUrl(p.id), p.unsubscribed_at ? 'yes' : '', p.first_seen,

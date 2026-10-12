@@ -77,6 +77,14 @@ export async function ensureSchema(db: Db): Promise<void> {
     ADD COLUMN IF NOT EXISTS linkedin_key TEXT,
     ADD COLUMN IF NOT EXISTS sent_from TEXT NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS sent_from_email TEXT NOT NULL DEFAULT ''`);
+  // The brand each lead belongs to (see brands.ts) and the overlap it was split in. Leads saved before brands existed
+  // were all found for Humans of Globe.
+  await db.query(`ALTER TABLE people
+    ADD COLUMN IF NOT EXISTS brand TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS brand_group TEXT NOT NULL DEFAULT ''`);
+  // ('none' marks leads outside every brand's countries, which are never emailed.)
+  await db.query("UPDATE people SET brand = 'hog' WHERE brand = ''");
+  await db.query('CREATE INDEX IF NOT EXISTS people_brand ON people (brand, brand_group)');
   await db.query('ALTER TABLE people ALTER COLUMN linkedin_url DROP NOT NULL');
   await db.query("CREATE UNIQUE INDEX IF NOT EXISTS people_apollo_person ON people (apollo_person_id) WHERE apollo_person_id <> ''");
   await db.query('CREATE INDEX IF NOT EXISTS people_contact ON people (apollo_contact_id)');
@@ -200,7 +208,7 @@ export function splitByCountry(people: Person[]): { kept: Person[]; excluded: Pe
 export type SaveResult = { inserted: number; updated: number };
 
 /**
- * Saves people by LinkedIn URL. A profile already saved is not added again: its "seen" count goes up, and any blank
+ * Saves people by LinkedIn URL (the earlier Google LinkedIn search, which found leads for Humans of Globe). A profile already saved is not added again: its "seen" count goes up, and any blank
  * field (title, company, location) is filled in from the new sighting. Existing values are never overwritten.
  */
 export async function savePeople(db: Db, people: Person[], geo: Geo | string, query: string, opts: { fundContext?: boolean } = {}): Promise<SaveResult> {
@@ -211,8 +219,8 @@ export async function savePeople(db: Db, people: Person[], geo: Geo | string, qu
     // Found by a fund search (hedge fund, VC, family office): a CIO or principal there is the main person.
     const tag = tagTitle(p.title, opts.fundContext ? `${p.company} fund` : p.company);
     const rows = await db.query<{ inserted: boolean }>(
-      `INSERT INTO people (linkedin_url, name, title, company, location, geo, geo_match, labels, is_target, inferred, snippet, source_query, rank, company_key, linkedin_key)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      `INSERT INTO people (linkedin_url, name, title, company, location, geo, geo_match, labels, is_target, inferred, snippet, source_query, rank, company_key, linkedin_key, brand)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'hog')
        ON CONFLICT (linkedin_url) DO UPDATE SET
          last_seen = now(),
          seen_count = people.seen_count + 1,
@@ -273,6 +281,8 @@ export type SavedPerson = {
   sector?: string;
   /** small (up to 50 employees), large or unknown. */
   firm_size?: string;
+  /** The brand they belong to: hog, gulficons or ciominds. Only that brand ever contacts them. */
+  brand?: string;
   /** The edition segment they are pitched for ("Healthcare", "Technology"…). */
   segment?: string;
   /** The rule title they hold ("Managing Director"). */
@@ -302,7 +312,7 @@ export type SavedPerson = {
 /** The columns every list of people reads. */
 export const PERSON_COLUMNS = `id, linkedin_url, name, title, company, location, geo, geo_match, labels, is_target, inferred, status, seen_count, first_seen, last_seen,
   email, email_status, apollo_status, apollo_confidence, apollo_tier, rank, company_employees, company_size, company_website, company_domain, industry,
-  country, sector, firm_size, segment, target_title, icp_fit, icp_note, suppressed_reason, sequence_status, sequence_note, sequenced_at, sent_from,
+  country, brand, sector, firm_size, segment, target_title, icp_fit, icp_note, suppressed_reason, sequence_status, sequence_note, sequenced_at, sent_from,
   sent_from_email, opener, opener_fact, opener_status, unsubscribed_at`;
 
 /** Not on the suppression list (clients and people contacted before), checked live (see suppression.ts). */
@@ -321,8 +331,10 @@ export const READY_SQL = `email <> '' AND email_status = 'verified' AND apollo_s
   AND unsubscribed_at IS NULL AND ${NOT_SUPPRESSED_SQL}`;
 
 export type ListOptions = {
-  /** A market (af, eu, us, ae) or an earlier country code. */
+  /** A market (me, eu, us, af) or an earlier country code. */
   geo?: string;
+  /** Only this brand's leads. */
+  brand?: string;
   targetOnly?: boolean;
   /** Only people who can be emailed (READY_SQL). */
   ready?: boolean;
@@ -343,6 +355,10 @@ export async function listPeople(db: Db, opts: ListOptions = {}): Promise<SavedP
     params.push(opts.geo);
     where.push(`geo = $${params.length}`);
   }
+  if (opts.brand) {
+    params.push(opts.brand);
+    where.push(`brand = $${params.length}`);
+  }
   if (opts.targetOnly) where.push('is_target = TRUE');
   if (opts.ready) where.push(READY_SQL);
   if (opts.topOnly) where.push('rank = 1');
@@ -358,6 +374,12 @@ export async function listPeople(db: Db, opts: ListOptions = {}): Promise<SavedP
      ORDER BY ${opts.orderBy === 'emails' ? 'apollo_checked_at DESC NULLS LAST,' : ''} first_seen DESC, id DESC LIMIT $${params.length}`,
     params,
   );
+}
+
+/** Per brand: everyone saved and who can be emailed. */
+export async function countBrands(db: Db): Promise<{ brand: string; total: number; ready: number }[]> {
+  await ensureSchema(db);
+  return db.query(`SELECT brand, count(*)::int AS total, count(*) FILTER (WHERE ${READY_SQL})::int AS ready FROM people GROUP BY brand ORDER BY brand`);
 }
 
 /** Per market: everyone saved, the target people, the main person of each company (rank 1), and who can be emailed. */

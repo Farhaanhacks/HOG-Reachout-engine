@@ -5,12 +5,13 @@ import { useEffect, useState } from 'react';
 import { CountryBadge, EmailBadge, PersonName, RunBadge, SizeBadge } from '../components/badges';
 import { api, countryName, formatDate } from '../lib/client';
 import type { EnrichStatus } from '../lib/enrich';
-import { MARKET_LIST, marketShort } from '../lib/markets';
+import { BRANDS, BRAND_LIST } from '../lib/brands';
 import type { Run } from '../lib/run';
 import type { SavedPerson } from '../lib/store';
 
 type Overview = {
   people: { geo: string; total: number; targets: number; main: number; ready: number }[];
+  brands: { brand: string; total: number; ready: number }[];
   enrich: EnrichStatus;
   runs: Run[];
   latest: SavedPerson[];
@@ -28,14 +29,14 @@ export default function OverviewPage() {
   }, []);
 
   const n = (v: number | string | null | undefined) => (data ? (v ?? 0) : '—');
-  const byMarket = (geo: string) => data?.people.find((p) => p.geo === geo);
+  const byBrand = (b: string) => data?.brands.find((x) => x.brand === b);
 
   return (
     <div className="page">
       <div className="page-head">
         <div>
           <h1>Overview</h1>
-          <p className="sub">Company leaders in Africa, Europe, the US and the UAE, with verified emails, ready for personalized outreach.</p>
+          <p className="sub">Company leaders for Humans of Globe, Gulf Icons and CIO Minds, each lead belonging to one brand only, with verified emails ready for personalized outreach.</p>
         </div>
         <Link href="/run" className="btn primary big">Find leads</Link>
       </div>
@@ -45,7 +46,9 @@ export default function OverviewPage() {
       <div className="stats">
         <div className="stat"><div className="n">{n(data && sum(data.people, 'total'))}</div><div className="l">Leads saved</div></div>
         <Link href="/leads?ready=1" className="stat stat-link"><div className="n">{n(data && sum(data.people, 'ready'))}</div><div className="l">Ready to email →</div></Link>
-        {MARKET_LIST.map((g) => <div key={g} className="stat"><div className="n">{n(byMarket(g)?.ready ?? 0)}</div><div className="l">Ready in {marketShort(g)}</div></div>)}
+        {BRAND_LIST.map((b) => (
+          <Link key={b} href={`/leads?ready=1&brand=${b}`} className="stat stat-link"><div className="n">{n(byBrand(b)?.ready ?? 0)}</div><div className="l">{BRANDS[b].label} ready →</div></Link>
+        ))}
         <div className="stat"><div className="n">{n(data ? `${data.enrich.usedToday}/${data.enrich.dailyLimit}` : '')}</div><div className="l">Apollo lookups today</div></div>
       </div>
 
