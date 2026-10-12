@@ -301,3 +301,11 @@ describe('sendTest', () => {
     await expect(sendTest(svc, db, { sequenceId: 's', testEmail: 'nope' })).rejects.toThrow('Enter a valid test email address.');
   });
 });
+
+describe('subject', () => {
+  it('writes the possessive correctly for names ending in s', async () => {
+    const { subjectFor } = await import('../src/lib/pitch');
+    expect(subjectFor('DAMAC Properties')).toBe("Featuring DAMAC Properties' leadership story");
+    expect(subjectFor('Acme')).toBe("Featuring Acme's leadership story");
+  });
+});

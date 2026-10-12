@@ -89,7 +89,9 @@ export function firstNameOf(name: string): string {
 }
 
 export function subjectFor(company: string): string {
-  return company ? `Featuring ${company}'s leadership story` : 'An invitation to share your leadership story';
+  if (!company) return 'An invitation to share your leadership story';
+  // "DAMAC Properties" takes "DAMAC Properties'", not "DAMAC Properties's".
+  return `Featuring ${company}${/s$/i.test(company.trim()) ? "'" : "'s"} leadership story`;
 }
 
 /** "as Founder & CEO at Acme", "at Acme", or nothing, depending on what we know. */
