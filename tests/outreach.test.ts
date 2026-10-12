@@ -2,7 +2,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { listSequences } from '../src/lib/apollo-sequences';
 import type { Person } from '../src/lib/linkedin';
-import { APOLLO_LABEL, fullEmail, outreachStatus, pushToApollo, sendTest, toApolloContact } from '../src/lib/outreach';
+import { APOLLO_LABEL, fullEmail, outreachStatus, pushToApollo, sendTest, testAddress, toApolloContact } from '../src/lib/outreach';
 import { sequenceTemplate, sequenceTemplateHtml } from '../src/lib/pitch';
 import type { Services } from '../src/lib/services';
 import { savePeople, type Db } from '../src/lib/store';
@@ -305,12 +305,19 @@ describe('sendTest', () => {
   it("sends a real lead's personalized email to the test address without touching the lead", async () => {
     await seed({ a: {} });
     const { svc, contacts, adds } = fakeApollo();
-    expect(await sendTest(svc, db, { sequenceId: 'seq-1', emailAccountId: 'b2', testEmail: 'me@team.com' })).toEqual({ added: true, reason: undefined, from: 'eve@hog-two.com' });
+    expect(await sendTest(svc, db, { sequenceId: 'seq-1', emailAccountId: 'b2', testEmail: 'me@team.com' })).toEqual({ added: true, reason: undefined, from: 'eve@hog-two.com', to: 'me@team.com' });
     expect(contacts[0]).toMatchObject({ email: 'me@team.com', first_name: 'A', organization_name: 'Humans of Globe (test)' });
     expect(contacts[0].typed_custom_fields['f-unsub']).toBe(unsubscribeUrl(TEST_ID));
     expect(adds[0].getAll('contact_ids[]')).toEqual(['c-me@team.com']);
     expect(adds[0].get('sequence_unverified_email')).toBe('true'); // the team's own address need not be verified
     expect(await rowOf('a')).toMatchObject({ sequence_status: '' });
+  });
+
+  it('gives each test to a Gmail or Outlook inbox a fresh +tag, so it never collides with an earlier test', () => {
+    expect(testAddress('me@gmail.com', 'abc')).toBe('me+hogtestabc@gmail.com');
+    expect(testAddress('me+old@Outlook.com', 'x1')).toBe('me+hogtestx1@Outlook.com');
+    expect(testAddress('me@company.com', 'abc')).toBe('me@company.com'); // company servers may not support +tags
+    expect(testAddress('me@gmail.com')).not.toBe(testAddress('me@gmail.com', 'other'));
   });
 
   it('refuses an invalid address', async () => {

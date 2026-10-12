@@ -148,11 +148,11 @@ export default function OutreachPage() {
   const doTest = () =>
     act(async () => {
       setTestResult('');
-      const d = await api<{ added: boolean; reason?: string; from: string }>('/api/outreach', post({ action: 'test', sequenceId, emailAccountId: testInbox, testEmail }));
+      const d = await api<{ added: boolean; reason?: string; from: string; to: string }>('/api/outreach', post({ action: 'test', sequenceId, emailAccountId: testInbox, testEmail }));
       setTestResult(
         d.added
-          ? `Added ${testEmail} to the sequence with a real personalized email, sending from ${d.from}. It arrives when the sequence's first step sends.`
-          : `Apollo did not add ${testEmail}: ${d.reason ?? 'no reason given'}. Remove that contact from the sequence in Apollo to test again.`,
+          ? `Added ${d.to} to the sequence with a real personalized email, sending from ${d.from}. It arrives in your ${testEmail} inbox when the sequence's first step sends (its delay and sending hours apply).`
+          : `Apollo did not add ${d.to}: ${d.reason ?? 'no reason given'}. Use a different test address, or remove that contact from the sequence in Apollo.`,
       );
     });
 

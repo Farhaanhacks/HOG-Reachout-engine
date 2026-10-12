@@ -249,13 +249,26 @@ export async function heldBack(db: Db, limit = 50): Promise<SavedPerson[]> {
   );
 }
 
+/** Providers that deliver name+tag@domain to name@domain, so each test can be a new Apollo contact in the same inbox. */
+const PLUS_ADDRESSING = new Set(['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'icloud.com', 'me.com', 'proton.me', 'protonmail.com']);
+
+/**
+ * The address a test goes to: for providers that support it, a fresh +tag (me+hogtest1a2b@gmail.com), which arrives in
+ * the same inbox but is a new contact to Apollo, so a test never collides with an earlier test already in the sequence.
+ */
+export function testAddress(email: string, tag: string = Date.now().toString(36)): string {
+  const [local, domain] = email.trim().split('@');
+  if (!local || !domain || !PLUS_ADDRESSING.has(domain.toLowerCase())) return email.trim();
+  return `${local.split('+')[0]}+hogtest${tag}@${domain}`;
+}
+
 /**
  * A test: one saved person's real personalized email, sent through the sequence to an address the team owns, from the
  * chosen inbox (or the first one that can send). The test contact gets a separate company name so Apollo never treats
  * the real person's company as already in the sequence, and an unsubscribe link that unsubscribes nobody. The real
  * person is not contacted or marked.
  */
-export async function sendTest(svc: Services, db: Db, opts: { sequenceId: string; emailAccountId?: string; testEmail: string; personId?: number | string }): Promise<{ added: boolean; reason?: string; from: string }> {
+export async function sendTest(svc: Services, db: Db, opts: { sequenceId: string; emailAccountId?: string; testEmail: string; personId?: number | string }): Promise<{ added: boolean; reason?: string; from: string; to: string }> {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(opts.testEmail)) throw new Error('Enter a valid test email address.');
   if (!opts.sequenceId) throw new Error('Choose an Apollo sequence first.');
   const fields = await requireFields(svc);
@@ -268,11 +281,12 @@ export async function sendTest(svc: Services, db: Db, opts: { sequenceId: string
     ? await db.query<SavedPerson>(`SELECT ${PERSON_COLUMNS} FROM people WHERE id = $1`, [opts.personId])
     : await db.query<SavedPerson>(`SELECT ${PERSON_COLUMNS} FROM people WHERE ${READY_SQL} ORDER BY (opener_status = 'done') DESC, COALESCE(rank, 3), id LIMIT 1`);
   const sample: ContactSource = person ?? { id: TEST_ID, name: 'Test Person', title: 'CEO', company: 'Example Company', email: '', opener: '' };
+  const to = testAddress(opts.testEmail);
   const contactId = await createContact(
     svc,
-    toApolloContact({ ...sample, email: opts.testEmail }, fields, { unsubscribeId: TEST_ID, organizationName: 'Humans of Globe (test)', editions: settings.editions }),
+    toApolloContact({ ...sample, email: to }, fields, { unsubscribeId: TEST_ID, organizationName: 'Humans of Globe (test)', editions: settings.editions }),
   );
   const res = await addToSequence(svc, opts.sequenceId, [contactId], inbox.id, { allowUnverified: true });
   const reason = res.skipped[contactId];
-  return { added: !reason && res.added.includes(contactId), reason: reason ? skipReason(reason) : undefined, from: inbox.email };
+  return { added: !reason && res.added.includes(contactId), reason: reason ? skipReason(reason) : undefined, from: inbox.email, to };
 }
