@@ -6,6 +6,7 @@ import { APOLLO_LABEL, fullEmail, outreachStatus, pushToApollo, sendTest, testAd
 import { sequenceTemplate, sequenceTemplateHtml } from '../src/lib/pitch';
 import type { Services } from '../src/lib/services';
 import { savePeople, type Db } from '../src/lib/store';
+import { mailboxStates } from '../src/lib/deliverability';
 import { importSuppression } from '../src/lib/suppression';
 import { TEST_ID, unsubscribeUrl } from '../src/lib/unsubscribe';
 
@@ -16,8 +17,9 @@ const FIELDS = [
   { id: 'f-edition', name: 'HOG Edition', modality: 'contact' },
   { id: 'f-industry', name: 'HOG Industry', modality: 'contact' },
   { id: 'f-role', name: 'HOG Role', modality: 'contact' },
+  { id: 'f-sender', name: 'HOG Sender', modality: 'contact' },
 ];
-const fieldIds = { subject: 'f-subject', opener: 'f-opener', unsubscribe: 'f-unsub', edition: 'f-edition', industry: 'f-industry', role: 'f-role' };
+const fieldIds = { subject: 'f-subject', opener: 'f-opener', unsubscribe: 'f-unsub', edition: 'f-edition', industry: 'f-industry', role: 'f-role', sender: 'f-sender' };
 
 /** Inboxes for the three brands, like the team's. */
 const ACCOUNTS = [
@@ -134,6 +136,7 @@ describe('the Apollo contact and email', () => {
         edition_name: 'Top HealthTech Leaders to Watch in 2026',
       },
       fieldIds,
+      { senderName: 'John Cooper' },
     );
     expect(c).toEqual({
       email: 'a@acme.com',
@@ -148,6 +151,7 @@ describe('the Apollo contact and email', () => {
         'f-role': 'your role as CEO at Acme',
         'f-edition': 'Top HealthTech Leaders to Watch in 2026',
         'f-industry': 'Healthcare Leaders',
+        'f-sender': 'John Cooper',
         'f-unsub': unsubscribeUrl(7),
       },
     });
@@ -169,7 +173,7 @@ describe('the Apollo contact and email', () => {
         .replace('{{contact.HOG Opener}}', 'Congratulations on your Riyadh office!')
         .replace('{{contact.HOG Role}}', 'your role as CEO at Acme')
         .replace('{{contact.HOG Edition}}', 'Top Cyber Leaders to Watch in 2026')
-        .replace('{{sender_first_name}} {{sender_last_name}}', 'Ava Williams');
+        .replace('{{contact.HOG Sender}}', 'Ava Williams');
       expect(e.body).toBe(rendered);
     }
     expect(sequenceTemplate().subject).toBe('{{contact.HOG Subject}}');
@@ -210,7 +214,7 @@ describe('the Cover Story template', () => {
     expect(html).toContain('<li style="margin:0 0 4px;">Five complimentary printed copies</li>');
     expect(html).toContain('<a href="{{contact.HOG Unsubscribe link}}"');
     expect(html.match(/<a /g)).toHaveLength(1);
-    expect(html).toContain('{{sender_first_name}} {{sender_last_name}}<br>Business Development Manager<br>Humans of Globe');
+    expect(html).toContain('Warm regards,<br>{{contact.HOG Sender}}<br>Business Development Manager<br>Humans of Globe');
     expect(sequenceTemplateHtml('hog', 'B')).not.toContain('Featuring Fee');
   });
 });
@@ -237,10 +241,14 @@ describe('pushToApollo', () => {
     expect((await push(svc)).requested).toBe(0); // nobody twice
   });
 
-  it("takes turns across the brand's own inboxes only, and records who sent to whom", async () => {
+  it("takes turns across the brand's own inboxes only, signs each email with its inbox's name, and records who sent to whom", async () => {
     await seed({ a: {}, b: {}, c: {}, d: {} });
-    const { svc, adds } = fakeApollo();
+    const { svc, adds, contacts } = fakeApollo();
+    await mailboxStates(db, 1); // creates the table
+    await db.query("INSERT INTO mailboxes (id, email, sender_name) VALUES ('a1', 'ava@humansofglobe.com', 'Ava Williams')");
     const summary = await push(svc);
+    // a1 has a name set; a2 and a3 sign with a name guessed from their address.
+    expect(contacts.map((c) => c.typed_custom_fields['f-sender']).sort()).toEqual(['Ava Williams', 'Ava Williams', 'Ben', 'Cat']);
     expect(adds.map((a) => a.get('send_email_from_email_account_id'))).toEqual(['a1', 'a2', 'a3']);
     expect(adds.map((a) => a.getAll('contact_ids[]').length)).toEqual([2, 1, 1]);
     expect(Object.keys(summary.byInbox).sort()).toEqual(['ava@humansofglobe.com', 'ben@humansofglobe.com', 'cat@humansofglobe.com']);
@@ -321,7 +329,7 @@ describe('pushToApollo', () => {
   it('refuses to send while the custom fields are missing', async () => {
     await seed({ a: {} });
     const { svc, contacts } = fakeApollo({ fields: FIELDS.slice(0, 3) });
-    await expect(push(svc)).rejects.toThrow('Create these custom contact fields in Apollo first: HOG Role, HOG Edition, HOG Industry.');
+    await expect(push(svc)).rejects.toThrow('Create these custom contact fields in Apollo first: HOG Role, HOG Edition, HOG Industry, HOG Sender.');
     expect(contacts).toHaveLength(0);
   });
 

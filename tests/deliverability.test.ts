@@ -1,6 +1,6 @@
 import { PGlite } from '@electric-sql/pglite';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { allocate, autoPause, checkDomain, emailsToday, mailboxStates, newPeopleToday, pauseReason, updateMailbox, type MailboxState } from '../src/lib/deliverability';
+import { allocate, autoPause, checkDomain, emailsToday, guessSenderName, mailboxStates, newPeopleToday, pauseReason, senderNameOf, updateMailbox, type MailboxState } from '../src/lib/deliverability';
 import type { Services } from '../src/lib/services';
 import { savePeople, type Db } from '../src/lib/store';
 import { importSuppression, suppressedReason, suppressionStatus } from '../src/lib/suppression';
@@ -19,6 +19,16 @@ beforeEach(async () => {
 const health = { sent: 0, bounced: 0, spam: 0, replied: 0, opened: 0, unsubscribed: 0, bounceRate: 0, spamRate: 0 };
 const box = (id: string, domain: string, room: number): MailboxState =>
   ({ id, email: `${id}@${domain}`, domain, usable: room > 0, room, health } as unknown as MailboxState);
+
+describe('sender names', () => {
+  it('guesses a name from the address until the team sets one', () => {
+    expect(guessSenderName('zoya.farah@ciominds.com')).toBe('Zoya Farah');
+    expect(guessSenderName('john@humansofglobe.com')).toBe('John');
+    expect(guessSenderName('info2@x.com')).toBe('');
+    expect(senderNameOf({ email: 'john@humansofglobe.com', sender_name: ' John Cooper ' })).toBe('John Cooper');
+    expect(senderNameOf({ email: '123@x.com', sender_name: '' })).toBe('The editorial team');
+  });
+});
 
 describe('warm-up and rotation', () => {
   it('starts each inbox at 20 a day and adds 3 a day up to its limit', () => {

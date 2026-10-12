@@ -324,7 +324,7 @@ export default function OutreachPage() {
               Create a sequence with automatic email steps ({data?.emailsPerPerson ?? 3} emails per person, as set on the Targeting page). Paste the subject and body below into the first step, and keep the unsubscribe line in every step. Re-insert each <code>{'{{…}}'}</code> field with Apollo&apos;s <code>{'{ }'}</code> variable picker if it does not turn into a variable.
             </li>
             <li>
-              The template carries the signature, with the sender&apos;s name from Apollo&apos;s <code>{'{{sender_first_name}} {{sender_last_name}}'}</code>: untick <b>Include signature</b> in the step, and if those two show in red, re-insert them from the variable picker&apos;s <b>Sender</b> tab.
+              The template carries the signature: untick <b>Include signature</b> in the step. The name it signs with is each inbox&apos;s own (<code>HOG Sender</code>), set on the <Link href="/deliverability">Deliverability</Link> page.
             </li>
             <li>Send a test to your own inbox, check it, then activate the sequence.</li>
           </ol>

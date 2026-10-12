@@ -24,6 +24,8 @@ export const WINDOW_DAYS = 7;
 type MailboxRow = {
   id: string;
   email: string;
+  /** The name it signs with, set on the Deliverability page; '' until then. */
+  sender_name: string;
   enabled: boolean;
   max_per_day: number;
   ramp: boolean;
@@ -51,6 +53,20 @@ export type MailboxState = MailboxRow & {
 const EMPTY: Health = { sent: 0, bounced: 0, spam: 0, replied: 0, opened: 0, unsubscribed: 0, bounceRate: 0, spamRate: 0 };
 
 export const domainOf = (email: string) => (email.split('@')[1] ?? '').toLowerCase();
+
+/** A name guessed from an address until the team sets one: "zoya.farah@…" gives "Zoya Farah", "john@…" gives "John". */
+export function guessSenderName(email: string): string {
+  return (email.split('@')[0] ?? '')
+    .split(/[._-]+/)
+    .filter((w) => w && !/\d/.test(w))
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
+/** The name an inbox signs its emails with. */
+export function senderNameOf(mb: { email: string; sender_name?: string }): string {
+  return mb.sender_name?.trim() || guessSenderName(mb.email) || 'The editorial team';
+}
 
 export function emailsToday(mb: { max_per_day: number; ramp: boolean; ramp_days: number }): number {
   if (!mb.ramp) return mb.max_per_day;
@@ -106,7 +122,7 @@ async function healthByMailbox(db: Db): Promise<Map<string, Health>> {
 export async function mailboxStates(db: Db, emailsPerPerson: number): Promise<MailboxState[]> {
   await ensureSchema(db);
   const rows = await db.query<MailboxRow>(
-    `SELECT id, email, enabled, max_per_day, ramp, (current_date - ramp_start)::int AS ramp_days, paused_reason, paused_at, apollo_active
+    `SELECT id, email, sender_name, enabled, max_per_day, ramp, (current_date - ramp_start)::int AS ramp_days, paused_reason, paused_at, apollo_active
      FROM mailboxes ORDER BY email`,
   );
   const added = new Map(
@@ -191,8 +207,13 @@ export function allocate(states: MailboxState[], n: number): string[] {
   return out;
 }
 
-export async function updateMailbox(db: Db, id: string, change: { enabled?: boolean; maxPerDay?: number; ramp?: boolean; restartRamp?: boolean; resume?: boolean }): Promise<void> {
+export async function updateMailbox(
+  db: Db,
+  id: string,
+  change: { enabled?: boolean; maxPerDay?: number; ramp?: boolean; restartRamp?: boolean; resume?: boolean; senderName?: string },
+): Promise<void> {
   await ensureSchema(db);
+  if (change.senderName !== undefined) await db.query('UPDATE mailboxes SET sender_name = $2 WHERE id = $1', [id, String(change.senderName).replace(/\s+/g, ' ').trim().slice(0, 80)]);
   if (change.enabled !== undefined) await db.query('UPDATE mailboxes SET enabled = $2 WHERE id = $1', [id, !!change.enabled]);
   if (change.maxPerDay !== undefined) await db.query('UPDATE mailboxes SET max_per_day = $2 WHERE id = $1', [id, Math.max(1, Math.min(200, Math.round(change.maxPerDay) || 50))]);
   if (change.ramp !== undefined) await db.query('UPDATE mailboxes SET ramp = $2 WHERE id = $1', [id, !!change.ramp]);

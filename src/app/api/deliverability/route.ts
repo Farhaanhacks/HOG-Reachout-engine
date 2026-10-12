@@ -48,13 +48,23 @@ export async function GET(req: Request) {
 }
 
 /**
- * action "update": changes one inbox { id, enabled?, maxPerDay?, ramp?, restartRamp?, resume? }.
+ * action "update": changes one inbox { id, enabled?, maxPerDay?, ramp?, restartRamp?, resume?, senderName? }.
  * action "dns": checks SPF, DKIM and DMARC for the sending domains { domains }.
  */
 export async function POST(req: Request) {
   const denied = checkPassword(req);
   if (denied) return denied;
-  const body = (await req.json().catch(() => ({}))) as { action?: string; id?: string; enabled?: boolean; maxPerDay?: number; ramp?: boolean; restartRamp?: boolean; resume?: boolean; domains?: string[] };
+  const body = (await req.json().catch(() => ({}))) as {
+    action?: string;
+    id?: string;
+    enabled?: boolean;
+    maxPerDay?: number;
+    ramp?: boolean;
+    restartRamp?: boolean;
+    resume?: boolean;
+    senderName?: string;
+    domains?: string[];
+  };
   const svc = { fetch, keys: keysFromEnv() };
   try {
     const db = getDb();

@@ -122,6 +122,8 @@ export async function ensureSchema(db: Db): Promise<void> {
     apollo_active BOOLEAN NOT NULL DEFAULT TRUE,
     added_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`);
+  // The name each inbox signs its emails with ("John Cooper"); blank means a name guessed from the address.
+  await db.query("ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS sender_name TEXT NOT NULL DEFAULT ''");
   // Every email Apollo has sent (or tried to) for our sequences, with what happened to it.
   await db.query(`CREATE TABLE IF NOT EXISTS messages (
     id TEXT PRIMARY KEY,

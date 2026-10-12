@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, formatDate, pct, post } from '../../lib/client';
-import type { DomainCheck, Health, MailboxState } from '../../lib/deliverability';
+import { guessSenderName, type DomainCheck, type Health, type MailboxState } from '../../lib/deliverability';
 import type { SyncSummary } from '../../lib/tracking';
 
 type Data = {
@@ -154,14 +154,25 @@ export default function DeliverabilityPage() {
 
       <section className="card">
         <h2>Inboxes</h2>
-        <p className="muted small">Set each inbox&apos;s top daily limit (50 to 100 once warmed up). Turn warm-up on in Apollo for every inbox too: this page paces how many new people each inbox starts, Apollo&apos;s warm-up builds its reputation.</p>
+        <p className="muted small">Type each inbox&apos;s full name under <b>Signs as</b> (it signs every email it sends, e.g. &quot;John Cooper&quot;; the grey text is a guess from the address). Set each inbox&apos;s top daily limit (50 to 100 once warmed up). Turn warm-up on in Apollo for every inbox too: this page paces how many new people each inbox starts, Apollo&apos;s warm-up builds its reputation.</p>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Inbox</th><th>Status</th><th className="num">Emails today</th><th>Top limit</th><th>Warm-up ramp</th><th className="num">New today</th><th>Bounced</th><th>Spam blocked</th><th className="num">Replies</th><th></th></tr></thead>
+            <thead><tr><th>Inbox</th><th>Signs as</th><th>Status</th><th className="num">Emails today</th><th>Top limit</th><th>Warm-up ramp</th><th className="num">New today</th><th>Bounced</th><th>Spam blocked</th><th className="num">Replies</th><th></th></tr></thead>
             <tbody>
               {data?.inboxes.map((i) => (
                 <tr key={i.id}>
                   <td><b>{i.email}</b></td>
+                  <td>
+                    <input
+                      key={`${i.id}-${i.sender_name}`}
+                      defaultValue={i.sender_name}
+                      placeholder={guessSenderName(i.email) || 'Full name'}
+                      style={{ width: 170, padding: '7px 10px' }}
+                      aria-label={`Name ${i.email} signs its emails with`}
+                      onBlur={(e) => e.target.value.trim() !== i.sender_name && update(i.id, { senderName: e.target.value })}
+                      disabled={busy}
+                    />
+                  </td>
                   <td>
                     {i.paused_reason ? <span className="badge bad" title={i.paused_reason}>Paused</span> : !i.apollo_active ? <span className="badge warn">Not active in Apollo</span> : i.enabled ? <span className="badge ok">Sending</span> : <span className="badge">Off</span>}
                     {i.paused_reason && <div className="faint small">{i.paused_reason}</div>}

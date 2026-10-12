@@ -1,6 +1,6 @@
 import { addToSequence, createContact, findCustomFields, missingFields, skipReason, type ApolloContactInput, type FieldIds } from './apollo-sequences';
 import { BRANDS, brandOfEmail, isBrand, type Brand } from './brands';
-import { allocate, autoPause, mailboxStates, syncMailboxes, type MailboxState } from './deliverability';
+import { allocate, autoPause, mailboxStates, senderNameOf, syncMailboxes, type MailboxState } from './deliverability';
 import { personalizeNext } from './personalize';
 import { draftEmail, fallbackOpenerFor, firstNameOf, roleFor, subjectFor, unsubscribeLine, type UnsubscribeStyle, type Variant } from './pitch';
 import { mapLimit, type Services } from './services';
@@ -34,7 +34,7 @@ type ContactSource = Pick<SavedPerson, 'id' | 'name' | 'title' | 'company' | 'em
  * line, their role, the edition they are shortlisted for (from the news research, or the edition table for their
  * industry), the industry line and their unsubscribe link.
  */
-export function emailParts(p: ContactSource, opts: { unsubscribeId?: number | string; editions?: Edition[] } = {}) {
+export function emailParts(p: ContactSource, opts: { unsubscribeId?: number | string; editions?: Edition[]; senderName?: string } = {}) {
   const e = editionFor(p.industry, opts.editions);
   return {
     subject: subjectFor(p.company),
@@ -42,6 +42,7 @@ export function emailParts(p: ContactSource, opts: { unsubscribeId?: number | st
     role: roleFor(p.title, p.company),
     edition: p.edition_name?.trim() || editionTitle(e),
     industry: e.industryLine,
+    sender: opts.senderName?.trim() || 'The editorial team',
     unsubscribe: unsubscribeUrl(opts.unsubscribeId ?? p.id),
   };
 }
@@ -58,7 +59,11 @@ export function fullEmail(
 }
 
 /** A saved person as an Apollo contact, with their personal parts in the custom fields. */
-export function toApolloContact(p: ContactSource, fields: FieldIds, opts: { unsubscribeId?: number | string; organizationName?: string; editions?: Edition[] } = {}): ApolloContactInput {
+export function toApolloContact(
+  p: ContactSource,
+  fields: FieldIds,
+  opts: { unsubscribeId?: number | string; organizationName?: string; editions?: Edition[]; senderName?: string } = {},
+): ApolloContactInput {
   const firstName = firstNameOf(p.name);
   const parts = emailParts(p, opts);
   const words = p.name.trim().split(/\s+/).filter(Boolean);
@@ -204,23 +209,26 @@ export async function pushToApollo(svc: Services, db: Db, opts: { sequenceId: st
   const people = await pendingOutreach(db, Math.min(opts.limit, room, BATCH), brand);
   if (!people.length) return summary;
 
-  const contacts = await mapLimit(people, 4, async (p) => {
+  // Each person's inbox is chosen first, so their email is signed with that inbox's own name.
+  const inboxFor = allocate(inboxes, people.length);
+  const byId = new Map(inboxes.map((s) => [s.id, s]));
+  const contacts = await mapLimit(people.slice(0, inboxFor.length), 4, async (p, i) => {
+    const inbox = inboxFor[i];
     try {
-      const contactId = await createContact(svc, toApolloContact(p, fields, { editions: settings.editions }));
+      const contactId = await createContact(svc, toApolloContact(p, fields, { editions: settings.editions, senderName: senderNameOf(byId.get(inbox) ?? { email: '' }) }));
       await db.query('UPDATE people SET apollo_contact_id = $2 WHERE id = $1', [p.id, contactId]);
-      return { p, contactId };
+      return { p, contactId, inbox };
     } catch (e) {
       summary.failed++;
       summary.error = (e as Error).message;
       return null;
     }
   });
-  const created = contacts.filter((c): c is { p: SavedPerson; contactId: string } => !!c);
+  const created = contacts.filter((c): c is { p: SavedPerson; contactId: string; inbox: string } => !!c);
   if (!created.length) return summary;
 
-  const inboxFor = allocate(inboxes, created.length);
   const groups = new Map<string, { p: SavedPerson; contactId: string }[]>();
-  created.slice(0, inboxFor.length).forEach((c, i) => groups.set(inboxFor[i], [...(groups.get(inboxFor[i]) ?? []), c]));
+  for (const c of created) groups.set(c.inbox, [...(groups.get(c.inbox) ?? []), c]);
   const emailOf = new Map(inboxes.map((s) => [s.id, s.email]));
 
   for (const [inbox, list] of groups) {
@@ -312,7 +320,12 @@ export async function sendTest(
   const to = testAddress(opts.testEmail);
   const contactId = await createContact(
     svc,
-    toApolloContact({ ...sample, email: to }, fields, { unsubscribeId: TEST_ID, organizationName: `${BRANDS[brand].label} (test)`, editions: settings.editions }),
+    toApolloContact({ ...sample, email: to }, fields, {
+      unsubscribeId: TEST_ID,
+      organizationName: `${BRANDS[brand].label} (test)`,
+      editions: settings.editions,
+      senderName: senderNameOf(inbox),
+    }),
     { dedupe: false },
   );
   const res = await addToSequence(svc, opts.sequenceId, [contactId], inbox.id, { allowUnverified: true });

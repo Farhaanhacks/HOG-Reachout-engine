@@ -10,15 +10,13 @@ import { BRANDS, type Brand } from './brands';
  * people between them, and the Results page tells them apart by whether the sent email contains the fee line.
  */
 
-/** The same for every sender. Each sender's own name comes from Apollo (the sending inbox's user). */
+/** The same for every sender. Each sender's own name is the sending inbox's name (the HOG Sender field). */
 export const SENDER = {
   designation: 'Business Development Manager',
   office: '+1 (253) 338-0280',
   whatsapp: '+1 253-338-0280',
 };
 
-/** Apollo's variables for the sending user's name (insert them from the editor's variable picker, Sender tab). */
-export const SENDER_NAME_VARIABLES = '{{sender_first_name}} {{sender_last_name}}';
 
 export const FEE_LINE = 'Proposed Featuring Fee: USD 2500';
 export type Variant = 'A' | 'B';
@@ -44,6 +42,7 @@ export const CUSTOM_FIELDS = {
   role: 'HOG Role',
   edition: 'HOG Edition',
   industry: 'HOG Industry',
+  sender: 'HOG Sender',
   unsubscribe: 'HOG Unsubscribe link',
 } as const;
 
@@ -176,15 +175,18 @@ export function fallbackOpenerFor(company: string): string {
 }
 
 const TEMPLATE_PARTS: EmailParts = { firstName: '', opener: fieldVariable('opener'), role: fieldVariable('role'), edition: fieldVariable('edition') };
+// The signature name is the sending inbox's own name ("John Cooper"), filled per person by the engine. Apollo's
+// {{sender_first_name}} would give the Apollo user who owns the inboxes instead.
+const TEMPLATE_SENDER = fieldVariable('sender');
 const TEMPLATE_GREETING = '{{#if first_name}}{{first_name}}{{#else}}Sir or Madam{{#endif}}';
 
 /** The plain-text email to paste into the brand's Apollo sequence step: version A or B, ending in the chosen opt-out. */
 export function sequenceTemplate(brand: Brand = 'hog', variant: Variant = 'A', style: UnsubscribeStyle = 'button'): { subject: string; body: string } {
-  const body = toText(blocks(brand, variant, TEMPLATE_PARTS, SENDER_NAME_VARIABLES, TEMPLATE_GREETING));
+  const body = toText(blocks(brand, variant, TEMPLATE_PARTS, TEMPLATE_SENDER, TEMPLATE_GREETING));
   return { subject: fieldVariable('subject'), body: style === 'apollo' ? body : `${body}\n\n${unsubscribeLine(style, fieldVariable('unsubscribe'))}` };
 }
 
 /** The same email as HTML for Apollo's raw HTML editor, ending in the Unsubscribe button. */
 export function sequenceTemplateHtml(brand: Brand = 'hog', variant: Variant = 'A'): string {
-  return `${toHtml(blocks(brand, variant, TEMPLATE_PARTS, SENDER_NAME_VARIABLES, TEMPLATE_GREETING))}\n${unsubscribeButtonHtml(fieldVariable('unsubscribe'))}`;
+  return `${toHtml(blocks(brand, variant, TEMPLATE_PARTS, TEMPLATE_SENDER, TEMPLATE_GREETING))}\n${unsubscribeButtonHtml(fieldVariable('unsubscribe'))}`;
 }
