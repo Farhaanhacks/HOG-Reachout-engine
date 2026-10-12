@@ -39,6 +39,11 @@ export const CUSTOM_FIELDS = {
   industry: 'HOG Industry',
 } as const;
 
+/** How a custom field is written in an Apollo template: {{contact.HOG Opener}} (the form Apollo's variable picker inserts). */
+export function fieldVariable(key: keyof typeof CUSTOM_FIELDS): string {
+  return `{{contact.${CUSTOM_FIELDS[key]}}}`;
+}
+
 export type DraftInput = {
   name: string;
   title: string;
@@ -135,17 +140,17 @@ export function draftEmail(p: DraftInput): Draft {
  */
 export function sequenceTemplate(style: UnsubscribeStyle = 'link'): { subject: string; body: string } {
   return {
-    subject: `{{${CUSTOM_FIELDS.subject}}}`,
+    subject: fieldVariable('subject'),
     body: [
       'Hi {{#if first_name}}{{first_name}}{{#else}}there{{#endif}},',
       '',
-      `{{${CUSTOM_FIELDS.opener}}}`,
+      fieldVariable('opener'),
       '',
-      afterOpener(`{{${CUSTOM_FIELDS.edition}}}`, `{{${CUSTOM_FIELDS.industry}}}`),
+      afterOpener(fieldVariable('edition'), fieldVariable('industry')),
       '',
       PITCH_PARAGRAPHS.join('\n\n'),
       // In the apollo style Apollo appends its own clickable Unsubscribe after the signature.
-      ...(style === 'apollo' ? [] : ['', unsubscribeLine(style, `{{${CUSTOM_FIELDS.unsubscribe}}}`)]),
+      ...(style === 'apollo' ? [] : ['', unsubscribeLine(style, fieldVariable('unsubscribe'))]),
     ].join('\n'),
   };
 }
@@ -174,5 +179,5 @@ export function sequenceTemplateHtml(): string {
   const text = sequenceTemplate('reply').body.split('\n\n');
   // The last paragraph of the text version is its unsubscribe line; the button replaces it.
   const paragraphs = text.slice(0, -1).map((p) => `<p style="margin:0 0 14px;">${escapeHtml(p).replace(/\n/g, '<br>')}</p>`);
-  return [...paragraphs, unsubscribeButtonHtml(`{{${CUSTOM_FIELDS.unsubscribe}}}`)].join('\n');
+  return [...paragraphs, unsubscribeButtonHtml(fieldVariable('unsubscribe'))].join('\n');
 }

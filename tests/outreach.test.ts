@@ -153,12 +153,12 @@ describe('the Apollo contact and email', () => {
     const t = sequenceTemplate();
     const rendered = t.body
       .replace('{{#if first_name}}{{first_name}}{{#else}}there{{#endif}}', 'Ahmed')
-      .replace('{{HOG Opener}}', 'Your Riyadh office caught our eye.')
-      .replace('{{HOG Edition}}', 'Cybersecurity Leaders Edition')
-      .replace('{{HOG Industry}}', 'Cybersecurity Leaders')
-      .replace('{{HOG Unsubscribe link}}', unsubscribeUrl(7));
+      .replace('{{contact.HOG Opener}}', 'Your Riyadh office caught our eye.')
+      .replace('{{contact.HOG Edition}}', 'Cybersecurity Leaders Edition')
+      .replace('{{contact.HOG Industry}}', 'Cybersecurity Leaders')
+      .replace('{{contact.HOG Unsubscribe link}}', unsubscribeUrl(7));
     expect(e.body).toBe(rendered);
-    expect(t.subject).toBe('{{HOG Subject}}');
+    expect(t.subject).toBe('{{contact.HOG Subject}}');
   });
 });
 
@@ -176,7 +176,7 @@ describe('price and unsubscribe styles', () => {
     const reply = sequenceTemplate('reply').body;
     expect(reply).toContain('just reply "unsubscribe"');
     expect(reply).not.toMatch(/https?:|\{\{HOG Unsubscribe link\}\}/);
-    expect(sequenceTemplate('link').body).toContain('{{HOG Unsubscribe link}}');
+    expect(sequenceTemplate('link').body).toContain('{{contact.HOG Unsubscribe link}}');
     const p = { id: 7, name: 'A B', title: 'CEO', company: 'Acme', email: 'a@acme.com', opener: 'x.' };
     expect(fullEmail(p, { style: 'reply' }).body).not.toContain('http');
   });
@@ -185,11 +185,11 @@ describe('price and unsubscribe styles', () => {
 describe('unsubscribe button', () => {
   it('builds an HTML email that ends in a real Unsubscribe button to the person\'s own link, and nothing else links out', () => {
     const html = sequenceTemplateHtml();
-    expect(html).toContain('<a href="{{HOG Unsubscribe link}}"');
+    expect(html).toContain('<a href="{{contact.HOG Unsubscribe link}}"');
     expect(html.trim().endsWith('</td></tr></table>')).toBe(true);
     expect(html).toContain('>Unsubscribe</a>');
     expect(html.match(/<a /g)).toHaveLength(1);
-    expect(html).toContain('<p style="margin:0 0 14px;">{{HOG Opener}}</p>');
+    expect(html).toContain('<p style="margin:0 0 14px;">{{contact.HOG Opener}}</p>');
     expect(html).toContain('USD 2,500');
     expect(html).not.toContain('reply "unsubscribe"');
     const p = { id: 7, name: 'A B', title: 'CEO', company: 'Acme', email: 'a@acme.com', opener: 'x.' };
