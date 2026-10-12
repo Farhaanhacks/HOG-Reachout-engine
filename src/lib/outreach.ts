@@ -285,6 +285,7 @@ export async function sendTest(svc: Services, db: Db, opts: { sequenceId: string
   const contactId = await createContact(
     svc,
     toApolloContact({ ...sample, email: to }, fields, { unsubscribeId: TEST_ID, organizationName: 'Humans of Globe (test)', editions: settings.editions }),
+    { dedupe: false },
   );
   const res = await addToSequence(svc, opts.sequenceId, [contactId], inbox.id, { allowUnverified: true });
   const reason = res.skipped[contactId];

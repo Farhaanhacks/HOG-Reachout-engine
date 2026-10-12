@@ -83,13 +83,15 @@ export type ApolloContactInput = {
 
 /**
  * Creates the person as an Apollo contact, or updates the existing contact with the same email (run_dedupe), so their
- * custom fields always hold the latest subject, opener and unsubscribe link. Returns the contact id.
+ * custom fields always hold the latest subject, opener and unsubscribe link. Returns the contact id. `dedupe: false`
+ * always makes a new contact: Apollo's dedupe also matches on name and company, so test contacts (which reuse a lead's
+ * name) would otherwise all collapse into the first one.
  */
-export async function createContact(svc: Services, input: ApolloContactInput): Promise<string> {
+export async function createContact(svc: Services, input: ApolloContactInput, opts: { dedupe?: boolean } = {}): Promise<string> {
   const res = await getJson<{ contact?: { id?: string } }>(svc, `${BASE}/contacts`, {
     method: 'POST',
     headers: headers(svc),
-    body: JSON.stringify({ ...input, run_dedupe: true }),
+    body: JSON.stringify({ ...input, run_dedupe: opts.dedupe !== false }),
   });
   const id = res.contact?.id;
   if (!id) throw new Error('Apollo did not return a contact id');

@@ -310,6 +310,7 @@ describe('sendTest', () => {
     expect(contacts[0].typed_custom_fields['f-unsub']).toBe(unsubscribeUrl(TEST_ID));
     expect(adds[0].getAll('contact_ids[]')).toEqual(['c-me@team.com']);
     expect(adds[0].get('sequence_unverified_email')).toBe('true'); // the team's own address need not be verified
+    expect(contacts[0].run_dedupe).toBe(false); // always a new contact, never merged into an earlier test
     expect(await rowOf('a')).toMatchObject({ sequence_status: '' });
   });
 
