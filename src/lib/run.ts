@@ -2,7 +2,7 @@ import { bulkMatch, type ApolloMatch } from './apollo';
 import { MAX_PAGE, PER_PAGE, searchPeople, searchesFor, type SearchSpec } from './apollo-search';
 import { DEFAULT_DAILY_LIMIT, enrichStatus, runEnrichment, statusOf, type EnrichSummary } from './enrich';
 import { companyKey, emailDomain, linkedinKey, normDomain } from './keys';
-import { eligibleBrands, pickBrand } from './brands';
+import { BRAND_LIST, brandsForMarket, eligibleBrands, pickBrand, quotasFor, type Brand, type Quotas } from './brands';
 import { MARKET_LIST, MARKET_TURNS, isMarket, marketOf, type Market } from './markets';
 import { tagTitle } from './seniority';
 import { getSettings, type Settings } from './settings';
@@ -37,10 +37,11 @@ type RunRow = {
   apollo_credits: number | string;
   status: 'running' | 'done' | 'stopped';
   error: string;
+  brand_ready?: string | null;
 };
 
-/** What a run is asked for: these markets, until this many new leads can be emailed. */
-export type RunBrief = { markets: string[]; target: number };
+/** What a run is asked for: these markets, until this many new leads can be emailed, split between the brands. */
+export type RunBrief = { markets: string[]; target: number; quotas?: Quotas };
 /** One search of a run: a page of one Apollo search. */
 export type RunQuery = SearchSpec & { page: number };
 
@@ -53,7 +54,24 @@ export type RunQuery = SearchSpec & { page: number };
  * results: people the searches returned. found: those with a wanted title. excluded: skipped before paying (already
  * saved, client company, or the wrong title). inserted / updated: leads saved. apollo_with_email: new leads ready to email.
  */
-export type Run = Omit<RunRow, 'brief' | 'queries' | 'apollo_credits'> & { brief: RunBrief; queries: RunQuery[]; apollo_credits: number };
+export type Run = Omit<RunRow, 'brief' | 'queries' | 'apollo_credits' | 'brand_ready'> & {
+  brief: RunBrief;
+  queries: RunQuery[];
+  apollo_credits: number;
+  /** New leads ready to email found so far, per brand. */
+  brand_ready: Partial<Quotas>;
+};
+
+/** What each brand still needs in a run (never below 0). */
+export function remainingNeed(run: Pick<Run, 'brief' | 'brand_ready'>): Quotas {
+  const quotas = run.brief.quotas ?? quotasFor(run.brief.target);
+  return Object.fromEntries(BRAND_LIST.map((b) => [b, Math.max(0, quotas[b] - (run.brand_ready[b] ?? 0))])) as Quotas;
+}
+
+/** Whether every brand has all the leads it needs. */
+export function quotasMet(run: Pick<Run, 'brief' | 'brand_ready'>): boolean {
+  return BRAND_LIST.every((b) => remainingNeed(run)[b] === 0);
+}
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(n) || lo));
 
@@ -72,11 +90,16 @@ function toRun(r: RunRow): Run {
       page: q.page ?? q.startPage ?? 1,
     }),
   );
+  let brandReady: Partial<Quotas> = {};
+  try {
+    brandReady = JSON.parse(r.brand_ready || '{}') as Partial<Quotas>;
+  } catch {}
   return {
     ...r,
-    brief: { markets: brief.markets ?? brief.geos ?? r.geo.split(','), target: brief.target ?? 0 },
+    brief: { markets: brief.markets ?? brief.geos ?? r.geo.split(','), target: brief.target ?? 0, quotas: brief.quotas },
     queries,
     apollo_credits: Number(r.apollo_credits) || 0,
+    brand_ready: brandReady,
   };
 }
 
@@ -109,7 +132,8 @@ export async function createRun(db: Db, brief: { markets?: string[]; target?: nu
   const turns = MARKET_TURNS.filter((m) => markets.includes(m));
   const pointer = new Map<Market, number>();
   // Searches are free, so a run plans plenty of them; what it pays for is capped by the target (see runStep).
-  const maxSteps = clamp(opts.maxSteps ?? Math.max(10, Math.ceil(target / 5)), 1, MAX_STEPS);
+  // Searches whose brands are already full are skipped for free, so plenty are planned.
+  const maxSteps = clamp(opts.maxSteps ?? Math.max(16, Math.ceil(target / 3)), 1, MAX_STEPS);
   const queries: RunQuery[] = [];
   for (let t = 0; queries.length < maxSteps && [...open.values()].some((l) => l.length); t++) {
     const m = turns[t % turns.length];
@@ -126,7 +150,7 @@ export async function createRun(db: Db, brief: { markets?: string[]; target?: nu
 
   const [row] = await db.query<RunRow>('INSERT INTO runs (geo, brief, queries, pages) VALUES ($1, $2, $3, 1) RETURNING *', [
     markets.join(','),
-    JSON.stringify({ markets, target } satisfies RunBrief),
+    JSON.stringify({ markets, target, quotas: quotasFor(target) } satisfies RunBrief),
     JSON.stringify(queries),
   ]);
   return toRun(row);
@@ -144,7 +168,14 @@ export async function listRuns(db: Db, limit = 20): Promise<Run[]> {
 }
 
 /** Saves one looked-up person with everything the brief asks for. Returns whether they are new and ready to email. */
-export async function saveApolloLead(db: Db, m: ApolloMatch, fallbackMarket: Market, settings: Settings, source: string): Promise<{ inserted: boolean; ready: boolean }> {
+export async function saveApolloLead(
+  db: Db,
+  m: ApolloMatch,
+  fallbackMarket: Market,
+  settings: Settings,
+  source: string,
+  run: { id?: number | string; need?: Partial<Quotas> } = {},
+): Promise<{ inserted: boolean; ready: boolean; brand: string }> {
   const rule = checkLead({ title: m.title, industry: m.industry, employees: m.org?.employees ?? null }, settings.rules);
   // Someone based outside every brand's countries is saved but never emailed.
   const covered = eligibleBrands(m.country).length > 0;
@@ -162,8 +193,8 @@ export async function saveApolloLead(db: Db, m: ApolloMatch, fallbackMarket: Mar
     m.website, domain, m.industry, m.country, check.sector, check.size, edition.segment, check.matched, check.fit, check.reason, suppressed,
     companyKey(m.company), linkedin ?? '', source,
   ];
-  const [existing] = await db.query<{ id: number | string }>(
-    "SELECT id FROM people WHERE apollo_person_id = $1 OR (linkedin_key <> '' AND linkedin_key = $2) ORDER BY id LIMIT 1",
+  const [existing] = await db.query<{ id: number | string; brand: string }>(
+    "SELECT id, brand FROM people WHERE apollo_person_id = $1 OR (linkedin_key <> '' AND linkedin_key = $2) ORDER BY id LIMIT 1",
     [m.id, linkedin ?? ''],
   );
   const set = `apollo_person_id = $1, linkedin_url = COALESCE($2, linkedin_url), name = COALESCE(NULLIF($3, ''), name), title = COALESCE(NULLIF($4, ''), title),
@@ -172,21 +203,23 @@ export async function saveApolloLead(db: Db, m: ApolloMatch, fallbackMarket: Mar
     company_domain = $18, industry = $19, country = $20, sector = $21, firm_size = $22, segment = $23, target_title = $24, icp_fit = $25, icp_note = $26,
     suppressed_reason = $27, company_key = $28, linkedin_key = $29, source_query = COALESCE(NULLIF(source_query, ''), $30), apollo_checked_at = now(),
     apollo_tier = 0, last_seen = now(), seen_count = seen_count + 1`;
+  let brand = existing?.brand ?? '';
   if (existing) {
     // A lead keeps the brand it was first given, so no two brands ever contact the same person.
     await db.query(`UPDATE people SET ${set} WHERE id = $31`, [...values, existing.id]);
   } else {
-    const picked = await pickBrand(db, eligibleBrands(m.country));
+    const picked = await pickBrand(db, eligibleBrands(m.country), run.need);
+    brand = picked?.brand ?? 'none';
     await db.query(
       `INSERT INTO people (apollo_person_id, linkedin_url, name, title, company, location, geo, labels, is_target, rank, email, email_status, apollo_status,
          apollo_confidence, company_employees, company_size, company_website, company_domain, industry, country, sector, firm_size, segment, target_title,
-         icp_fit, icp_note, suppressed_reason, company_key, linkedin_key, source_query, brand, brand_group, geo_match, apollo_checked_at)
+         icp_fit, icp_note, suppressed_reason, company_key, linkedin_key, source_query, brand, brand_group, run_id, geo_match, apollo_checked_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
-         $31, $32, 'match', now())`,
-      [...values, picked?.brand ?? 'none', picked?.group ?? ''],
+         $31, $32, $33, 'match', now())`,
+      [...values, brand, picked?.group ?? '', run.id ?? null],
     );
   }
-  return { inserted: !existing, ready: !!m.email && emailStatus === 'verified' && check.fit && !suppressed };
+  return { inserted: !existing, ready: !!m.email && emailStatus === 'verified' && check.fit && !suppressed, brand };
 }
 
 export type StepSummary = {
@@ -211,9 +244,19 @@ export async function runStep(svc: Services, db: Db, id: number | string, opts: 
   if (!run) throw new Error('Run not found');
   const summary: StepSummary = { searched: 0, wanted: 0, skipped: 0, lookedUp: 0, ready: 0, credits: 0 };
   if (run.status !== 'running' || run.next_index >= run.queries.length) return { run, summary };
-  const index = run.next_index;
+  if (!run.queries[run.next_index].titles.length) throw new Error('This run is from the earlier LinkedIn search and cannot be continued. Start a new run.');
+  if (quotasMet(run)) return { run, summary };
+  // Skip, for free, searches in markets whose brands already have all the leads they need.
+  const need = remainingNeed(run);
+  const marketNeed = (m: Market) => brandsForMarket(m).reduce((n, b) => n + need[b], 0);
+  let index = run.next_index;
+  while (index < run.queries.length && run.queries[index].titles.length && marketNeed(run.queries[index].market) === 0) index++;
+  if (index !== run.next_index) {
+    await db.query('UPDATE runs SET next_index = $2 WHERE id = $1 AND next_index = $3', [id, index, run.next_index]);
+    run.next_index = index;
+    if (index >= run.queries.length) return { run: (await getRun(db, id)) as Run, summary };
+  }
   const q = run.queries[index];
-  if (!q.titles.length) throw new Error('This run is from the earlier LinkedIn search and cannot be continued. Start a new run.');
   const dailyLimit = opts.dailyLimit ?? DEFAULT_DAILY_LIMIT;
   const room = dailyLimit - (await enrichStatus(db, dailyLimit)).usedToday;
   if (room <= 0) {
@@ -251,9 +294,8 @@ export async function runStep(svc: Services, db: Db, id: number | string, opts: 
   );
   const clients = await clientCompanies(db, wanted.map((p) => p.company));
   const fresh = wanted.filter((p) => !saved.has(p.id) && !clients.has(companyKey(p.company)));
-  // Never pay for more people than the run still needs: a run of 10 looks up about 10, not a whole page.
-  const need = run.brief.target ? Math.max(0, run.brief.target - run.apollo_with_email) : room;
-  const toLookUp = fresh.slice(0, Math.min(room, need));
+  // Never pay for more people than this market's brands still need: a run of 10 looks up about 10, not a whole page.
+  const toLookUp = fresh.slice(0, Math.min(room, run.brief.target ? marketNeed(q.market) : room));
   summary.skipped = found.people.length - toLookUp.length;
 
   let matches: (ApolloMatch | null)[] = [];
@@ -276,11 +318,18 @@ export async function runStep(svc: Services, db: Db, id: number | string, opts: 
     const m = matches[i];
     if (!m) continue;
     // Bulk match by id answers for that person; keep the id even if Apollo leaves it out of the answer.
-    const r = await saveApolloLead(db, { ...m, id: m.id || toLookUp[i].id }, q.market, settings, q.label);
+    const r = await saveApolloLead(db, { ...m, id: m.id || toLookUp[i].id }, q.market, settings, q.label, { id, need });
     if (r.inserted) inserted++;
     else updated++;
     if (m.email) withEmail++;
-    if (r.ready && r.inserted) summary.ready++;
+    if (r.ready && r.inserted) {
+      summary.ready++;
+      const b = r.brand as Brand;
+      if (b in need) {
+        need[b] = Math.max(0, need[b] - 1);
+        run.brand_ready[b] = (run.brand_ready[b] ?? 0) + 1;
+      }
+    }
   }
   summary.lookedUp = matches.length;
   if (matches.length) {
@@ -296,9 +345,23 @@ export async function runStep(svc: Services, db: Db, id: number | string, opts: 
   const [row] = await db.query<RunRow>(
     `UPDATE runs SET next_index = next_index + $3, searches = searches + 1, results = results + $4, found = found + $5, excluded = excluded + $6,
        inserted = inserted + $7, updated = updated + $8, apollo_requested = apollo_requested + $9, apollo_with_email = apollo_with_email + $10,
-       apollo_credits = apollo_credits + $11, error = $12
+       apollo_credits = apollo_credits + $11, error = $12, brand_ready = $13
      WHERE id = $1 AND next_index = $2 RETURNING *`,
-    [id, index, advance, summary.searched, summary.wanted, summary.skipped, inserted, updated, summary.lookedUp, summary.ready, summary.credits, summary.stopped ?? ''],
+    [
+      id,
+      index,
+      advance,
+      summary.searched,
+      summary.wanted,
+      summary.skipped,
+      inserted,
+      updated,
+      summary.lookedUp,
+      summary.ready,
+      summary.credits,
+      summary.stopped ?? '',
+      JSON.stringify(run.brand_ready),
+    ],
   );
   // No row means another tab advanced the run meanwhile; the people saved here are deduplicated anyway.
   return { run: row ? toRun(row) : ((await getRun(db, id)) as Run), summary };

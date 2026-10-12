@@ -23,7 +23,14 @@ export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as Partial<Record<keyof Settings, unknown>> & { reset?: string };
   const reset = (['rules', 'editions', 'emailsPerPerson', 'unsubscribeStyle'] as const).find((k) => k === body.reset);
   try {
-    return NextResponse.json({ settings: await saveSettings(getDb(), { rules: body.rules, editions: body.editions, emailsPerPerson: body.emailsPerPerson, unsubscribeStyle: body.unsubscribeStyle, reset }) });
+    return NextResponse.json({ settings: await saveSettings(getDb(), {
+        rules: body.rules,
+        editions: body.editions,
+        emailsPerPerson: body.emailsPerPerson,
+        unsubscribeStyle: body.unsubscribeStyle,
+        sequences: body.sequences,
+        reset,
+      }) });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });
   }

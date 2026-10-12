@@ -77,7 +77,7 @@ export default function OutreachPage() {
     const d = await api<Overview>(`/api/outreach?brand=${brand}`);
     setData(d);
     const seqIds = d.sequences.map((s) => s.id);
-    setSequenceId((current) => current || [remembered(sequenceKey(d.brand)), d.brand === 'hog' ? d.defaultSequenceId : ''].find((id) => id && seqIds.includes(id)) || '');
+    setSequenceId((current) => current || [d.defaultSequenceId, remembered(sequenceKey(d.brand))].find((id) => id && seqIds.includes(id)) || '');
   }, [brand]);
 
   function switchBrand(next: Brand) {
@@ -249,7 +249,12 @@ export default function OutreachPage() {
           )}
           <label className="field">
             Sequence
-            <select id="outreach-sequence" value={sequenceId} onChange={(e) => { setSequenceId(e.target.value); remember(sequenceKey(brand), e.target.value); }} disabled={busy}>
+            <select id="outreach-sequence" value={sequenceId} onChange={(e) => {
+              setSequenceId(e.target.value);
+              remember(sequenceKey(brand), e.target.value);
+              // Saved on the server too, so Run workflow uses the same sequence.
+              api('/api/settings', post({ sequences: { [brand]: e.target.value } })).catch(() => {});
+            }} disabled={busy}>
               <option value="">Choose a sequence</option>
               {data?.sequences.map((s) => <option key={s.id} value={s.id}>{s.name}{s.active ? '' : ' (not active)'}</option>)}
             </select>

@@ -46,7 +46,7 @@ export async function GET(req: Request) {
       brands: BRAND_LIST.map((id) => ({ id, ...BRANDS[id] })),
       configured: !!svc.keys.apollo,
       aiConfigured: !!svc.keys.deepseek,
-      defaultSequenceId: process.env.APOLLO_SEQUENCE_ID ?? '',
+      defaultSequenceId: settings.sequences[brand] ?? (brand === 'hog' ? (process.env.APOLLO_SEQUENCE_ID ?? '') : ''),
       sequences,
       inboxes: inboxes.map((s: MailboxState) => ({ id: s.id, email: s.email, domain: s.domain, usable: s.usable, room: s.room, newToday: s.newToday, addedToday: s.addedToday, paused: s.paused_reason })),
       room,
@@ -93,7 +93,10 @@ export async function POST(req: Request) {
     personId?: string;
     opener?: string;
     brand?: string;
+    runId?: string | number;
   };
+  // Run workflow sends only the leads its own run found.
+  const runId = body.runId ? String(body.runId) : undefined;
   const brand: Brand = isBrand(body.brand) ? body.brand : 'hog';
   const limit = Math.max(1, Math.min(Number(body.limit) || 25, 50));
   const svc = { fetch, keys: keysFromEnv() };
@@ -104,7 +107,7 @@ export async function POST(req: Request) {
       return NextResponse.json(await personalizeOne(svc, db, body.personId));
     }
     if (body.action === 'personalize') {
-      const summary = await personalizeNext(svc, db, Math.min(limit, 10));
+      const summary = await personalizeNext(svc, db, Math.min(limit, 10), runId);
       return NextResponse.json({ summary, status: await outreachStatus(db, outreachDailyLimitFromEnv(), brand) });
     }
     if (body.action === 'opener') {
@@ -120,7 +123,7 @@ export async function POST(req: Request) {
     }
     if (body.action === 'push') {
       if (body.confirm !== true) return NextResponse.json({ error: 'Adding people to a sequence starts real emails: send confirm true.' }, { status: 400 });
-      const summary = await pushToApollo(svc, db, { sequenceId: String(body.sequenceId ?? ''), limit, dailyLimit: outreachDailyLimitFromEnv(), brand });
+      const summary = await pushToApollo(svc, db, { sequenceId: String(body.sequenceId ?? ''), limit, dailyLimit: outreachDailyLimitFromEnv(), brand, runId });
       return NextResponse.json({ summary, status: await outreachStatus(db, outreachDailyLimitFromEnv(), brand) });
     }
     if (body.action === 'test') {

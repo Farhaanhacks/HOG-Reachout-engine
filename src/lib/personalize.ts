@@ -93,13 +93,13 @@ export function fallbackOpener(lead: { title: string; company: string }): string
 
 export type PersonalizeSummary = { done: number; none: number; failed: number; searches: number; error?: string };
 
-/** People with an email ready, not yet sent, and not yet personalized: main people first. */
-async function waiting(db: Db, limit: number): Promise<Lead[]> {
+/** People with an email ready, not yet sent, and not yet personalized (only one run's, if given): main people first. */
+async function waiting(db: Db, limit: number, runId?: number | string): Promise<Lead[]> {
   return db.query<Lead>(
     `SELECT id, name, title, company, geo, country, industry, snippet FROM people
-     WHERE ${READY_SQL} AND email <> '' AND sequence_status = '' AND opener_status IN ('', 'none')
+     WHERE ${READY_SQL} AND email <> '' AND sequence_status = '' AND opener_status IN ('', 'none') ${runId ? 'AND run_id = $2' : ''}
      ORDER BY COALESCE(rank, 3) ASC, apollo_checked_at ASC NULLS LAST, id ASC LIMIT $1`,
-    [Math.max(1, Math.min(limit, 25))],
+    runId ? [Math.max(1, Math.min(limit, 25)), runId] : [Math.max(1, Math.min(limit, 25))],
   );
 }
 
@@ -108,10 +108,10 @@ async function waiting(db: Db, limit: number): Promise<Lead[]> {
  * search (when we know their company) and one DeepSeek call. Every lead handled gets an opener: from the news, or with nothing
  * specific, from their role and company. A failure leaves them unmarked to try again.
  */
-export async function personalizeNext(svc: Services, db: Db, limit: number): Promise<PersonalizeSummary> {
+export async function personalizeNext(svc: Services, db: Db, limit: number, runId?: number | string): Promise<PersonalizeSummary> {
   if (!svc.keys.deepseek) throw new Error('DEEPSEEK_API_KEY is not set');
   await ensureSchema(db);
-  const leads = await waiting(db, limit);
+  const leads = await waiting(db, limit, runId);
   const summary: PersonalizeSummary = { done: 0, none: 0, failed: 0, searches: 0 };
   await mapLimit(leads, 4, async (lead) => {
     try {

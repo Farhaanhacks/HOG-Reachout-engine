@@ -38,7 +38,7 @@ export default function OverviewPage() {
           <h1>Overview</h1>
           <p className="sub">Company leaders for Humans of Globe, Gulf Icons and CIO Minds, each lead belonging to one brand only, with verified emails ready for personalized outreach.</p>
         </div>
-        <Link href="/run" className="btn primary big">Find leads</Link>
+        <Link href="/run" className="btn primary big">Run workflow</Link>
       </div>
 
       {error && <p className="alert" role="alert">{error}</p>}

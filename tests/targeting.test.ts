@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { companyKey, emailDomain, entriesFor, linkedinKey, normDomain } from '../src/lib/suppression';
 import { DEFAULT_RULES, checkLead, cleanRules, editionFor, editionTitle, firmSize, matchTitle, sectorOf } from '../src/lib/targeting';
-import { brandOfEmail, eligibleBrands } from '../src/lib/brands';
+import { brandOfEmail, eligibleBrands, quotasFor } from '../src/lib/brands';
 import { glForCountry, marketOf } from '../src/lib/markets';
 
 describe('matchTitle', () => {
@@ -96,6 +96,12 @@ describe('brands', () => {
     expect(eligibleBrands('Egypt')).toEqual(['hog']); // Africa
     expect(eligibleBrands('Jordan')).toEqual([]); // outside the GCC: no brand
     expect(eligibleBrands('Japan')).toEqual([]);
+  });
+
+  it('splits every run 40% Gulf Icons, 30% Humans of Globe, 30% CIO Minds', () => {
+    expect(quotasFor(10)).toEqual({ gulficons: 4, ciominds: 3, hog: 3 });
+    expect(quotasFor(20)).toEqual({ gulficons: 8, ciominds: 6, hog: 6 });
+    expect(quotasFor(50)).toEqual({ gulficons: 20, ciominds: 15, hog: 15 });
   });
 
   it('knows which brand an inbox sends for', () => {

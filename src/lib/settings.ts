@@ -1,3 +1,4 @@
+import { isBrand, type Brand } from './brands';
 import { UNSUBSCRIBE_STYLES, type UnsubscribeStyle } from './pitch';
 import { ensureSchema, type Db } from './store';
 import { DEFAULT_EDITIONS, DEFAULT_RULES, cleanEditions, cleanRules, type Edition, type TitleRules } from './targeting';
@@ -7,9 +8,22 @@ import { DEFAULT_EDITIONS, DEFAULT_RULES, cleanEditions, cleanRules, type Editio
  * edition table, and how many emails each person gets in the sequence (used to turn an inbox's daily email limit into how
  * many new people it can start each day), and how the email lets people opt out.
  */
-export type Settings = { rules: TitleRules; editions: Edition[]; emailsPerPerson: number; unsubscribeStyle: UnsubscribeStyle };
+export type Settings = {
+  rules: TitleRules;
+  editions: Edition[];
+  emailsPerPerson: number;
+  unsubscribeStyle: UnsubscribeStyle;
+  /** Each brand's Apollo sequence, used by Run workflow and the Outreach page. */
+  sequences: Partial<Record<Brand, string>>;
+};
 
-export const DEFAULT_SETTINGS: Settings = { rules: DEFAULT_RULES, editions: DEFAULT_EDITIONS, emailsPerPerson: 3, unsubscribeStyle: 'button' };
+export const DEFAULT_SETTINGS: Settings = { rules: DEFAULT_RULES, editions: DEFAULT_EDITIONS, emailsPerPerson: 3, unsubscribeStyle: 'button', sequences: {} };
+
+export function cleanSequences(v: unknown): Partial<Record<Brand, string>> {
+  const out: Partial<Record<Brand, string>> = {};
+  for (const [k, id] of Object.entries((v ?? {}) as Record<string, unknown>)) if (isBrand(k) && typeof id === 'string' && /^[\w-]{0,64}$/.test(id)) out[k] = id;
+  return out;
+}
 
 export function cleanUnsubscribeStyle(v: unknown): UnsubscribeStyle {
   return UNSUBSCRIBE_STYLES.find((s) => s === v) ?? DEFAULT_SETTINGS.unsubscribeStyle;
@@ -45,12 +59,19 @@ export async function setSetting(db: Db, key: string, value: unknown): Promise<v
 
 export async function getSettings(db: Db): Promise<Settings> {
   await ensureSchema(db);
-  const [rules, editions, emailsPerPerson, unsubscribeStyle] = await Promise.all([read(db, 'rules'), read(db, 'editions'), read(db, 'emailsPerPerson'), read(db, 'unsubscribeStyle')]);
+  const [rules, editions, emailsPerPerson, unsubscribeStyle, sequences] = await Promise.all([
+    read(db, 'rules'),
+    read(db, 'editions'),
+    read(db, 'emailsPerPerson'),
+    read(db, 'unsubscribeStyle'),
+    read(db, 'sequences'),
+  ]);
   return {
     rules: rules === undefined ? DEFAULT_RULES : cleanRules(rules),
     editions: editions === undefined ? DEFAULT_EDITIONS : cleanEditions(editions),
     emailsPerPerson: emailsPerPerson === undefined ? DEFAULT_SETTINGS.emailsPerPerson : cleanEmailsPerPerson(emailsPerPerson),
     unsubscribeStyle: cleanUnsubscribeStyle(unsubscribeStyle),
+    sequences: cleanSequences(sequences),
   };
 }
 
@@ -62,5 +83,7 @@ export async function saveSettings(db: Db, input: Partial<Record<keyof Settings,
   if (input.editions !== undefined) await setSetting(db, 'editions', cleanEditions(input.editions));
   if (input.emailsPerPerson !== undefined) await setSetting(db, 'emailsPerPerson', cleanEmailsPerPerson(input.emailsPerPerson));
   if (input.unsubscribeStyle !== undefined) await setSetting(db, 'unsubscribeStyle', cleanUnsubscribeStyle(input.unsubscribeStyle));
+  // One brand's sequence can be changed without touching the others.
+  if (input.sequences !== undefined) await setSetting(db, 'sequences', { ...(await getSettings(db)).sequences, ...cleanSequences(input.sequences) });
   return getSettings(db);
 }

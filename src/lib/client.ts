@@ -15,11 +15,15 @@ export const post = (body: unknown = {}): RequestInit => ({ method: 'POST', body
  * of 10 so each request stays short. Used straight after Apollo finds emails, so every email is personalized without
  * anyone pressing a button.
  */
-export async function personalizeWaiting(count: number, onProgress?: (done: number, none: number) => void): Promise<{ done: number; none: number; failed: number; error?: string }> {
+export async function personalizeWaiting(
+  count: number,
+  onProgress?: (done: number, none: number) => void,
+  runId?: number | string,
+): Promise<{ done: number; none: number; failed: number; error?: string }> {
   const total = { done: 0, none: 0, failed: 0, error: undefined as string | undefined };
   let left = count;
   while (left > 0) {
-    const r = await api<{ summary: { done: number; none: number; failed: number; error?: string } }>('/api/outreach', post({ action: 'personalize', limit: Math.min(10, left) }));
+    const r = await api<{ summary: { done: number; none: number; failed: number; error?: string } }>('/api/outreach', post({ action: 'personalize', limit: Math.min(10, left), runId }));
     total.done += r.summary.done;
     total.none += r.summary.none;
     total.failed += r.summary.failed;

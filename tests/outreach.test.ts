@@ -276,6 +276,15 @@ describe('pushToApollo', () => {
     expect(await push(svc)).toMatchObject({ requested: 0, stopped: expect.stringContaining("Today's sending limit is used up") });
   });
 
+  it('sends only the leads a given run found, when asked to', async () => {
+    await seed({ a: {}, b: {}, c: {} });
+    await db.query("UPDATE people SET run_id = 7 WHERE linkedin_url LIKE '%/a' OR linkedin_url LIKE '%/b'");
+    const { svc, contacts } = fakeApollo();
+    await pushToApollo(svc, db, { sequenceId: 'seq-1', limit: 25, runId: 7 });
+    expect(contacts.map((c) => c.email).sort()).toEqual(['a@aco.com', 'b@bco.com']);
+    expect(await outreachStatus(db, 500, 'hog')).toMatchObject({ waiting: 1 }); // c waits for the Outreach page
+  });
+
   it('stops at the overall daily limit', async () => {
     await seed({ a: {}, b: {}, c: {} });
     const { svc } = fakeApollo();

@@ -95,13 +95,13 @@ async function requireFields(svc: Services): Promise<FieldIds> {
  * Who goes to Apollo next for a brand: its people who can be emailed (verified email, target title, not suppressed or
  * unsubscribed) with a personal opener, not sent yet; main people first, then in the order they were found.
  */
-export async function pendingOutreach(db: Db, limit: number, brand: Brand = 'hog'): Promise<SavedPerson[]> {
+export async function pendingOutreach(db: Db, limit: number, brand: Brand = 'hog', runId?: number | string): Promise<SavedPerson[]> {
   await ensureSchema(db);
   return db.query<SavedPerson>(
     `SELECT ${PERSON_COLUMNS} FROM people
-     WHERE ${READY_SQL} AND brand = $2 AND sequence_status = '' AND opener_status = 'done' AND opener <> ''
+     WHERE ${READY_SQL} AND brand = $2 AND sequence_status = '' AND opener_status = 'done' AND opener <> '' ${runId ? 'AND run_id = $3' : ''}
      ORDER BY COALESCE(rank, 3) ASC, apollo_checked_at ASC NULLS LAST, id ASC LIMIT $1`,
-    [Math.max(1, Math.min(limit, 1000)), brand],
+    runId ? [Math.max(1, Math.min(limit, 1000)), brand, runId] : [Math.max(1, Math.min(limit, 1000)), brand],
   );
 }
 
@@ -186,7 +186,11 @@ export async function sendingRoom(db: Db, dailyLimit: number, emailsPerPerson: n
  * is paused. Then each of the brand's people is created as an Apollo contact (their personal parts in custom fields) and
  * given to one of the brand's own inboxes: they take turns, each within its warm-up limit for today.
  */
-export async function pushToApollo(svc: Services, db: Db, opts: { sequenceId: string; limit: number; dailyLimit?: number; brand?: Brand }): Promise<PushSummary> {
+export async function pushToApollo(
+  svc: Services,
+  db: Db,
+  opts: { sequenceId: string; limit: number; dailyLimit?: number; brand?: Brand; runId?: number | string },
+): Promise<PushSummary> {
   const brand = opts.brand ?? 'hog';
   if (!opts.sequenceId) throw new Error('Choose an Apollo sequence first.');
   const fields = await requireFields(svc);
@@ -205,8 +209,8 @@ export async function pushToApollo(svc: Services, db: Db, opts: { sequenceId: st
   if (room <= 0) return { ...summary, stopped: "Today's sending limit is used up across all inboxes (their warm-up limits and the daily cap). More can go tomorrow" };
   // Safety net: the pages normally personalize earlier.
   const status = await outreachStatus(db, dailyLimit, brand);
-  if (svc.keys.deepseek && status.toPersonalize > 0) await personalizeNext(svc, db, Math.min(opts.limit, room, 10)).catch(() => undefined);
-  const people = await pendingOutreach(db, Math.min(opts.limit, room, BATCH), brand);
+  if (svc.keys.deepseek && status.toPersonalize > 0) await personalizeNext(svc, db, Math.min(opts.limit, room, 10), opts.runId).catch(() => undefined);
+  const people = await pendingOutreach(db, Math.min(opts.limit, room, BATCH), brand, opts.runId);
   if (!people.length) return summary;
 
   // Each person's inbox is chosen first, so their email is signed with that inbox's own name.

@@ -35,10 +35,11 @@ export const MARKETS: Record<Market, { label: string; short: string; countries: 
 export const MARKET_LIST = Object.keys(MARKETS) as Market[];
 
 /**
- * The order searches take turns in. The GCC, Europe and the US get two turns for every one Africa gets: two brands
- * need each of them, while Africa is for Humans of Globe alone.
+ * The order searches take turns in. The GCC gets the most turns (Gulf Icons, 40% of every run, only has the GCC), then
+ * Europe and the US (CIO Minds), then Africa (Humans of Globe alone). A run skips any market whose brands already have
+ * all the leads they need.
  */
-export const MARKET_TURNS: Market[] = ['gcc', 'eu', 'us', 'gcc', 'af', 'eu', 'us'];
+export const MARKET_TURNS: Market[] = ['gcc', 'eu', 'gcc', 'us', 'gcc', 'eu', 'af', 'us'];
 
 export function isMarket(value: string): value is Market {
   return Object.prototype.hasOwnProperty.call(MARKETS, value);

@@ -193,6 +193,9 @@ export async function ensureSchema(db: Db): Promise<void> {
     status TEXT NOT NULL DEFAULT 'running',
     error TEXT NOT NULL DEFAULT ''
   )`);
+  // New leads ready to email per brand in each run ({"gulficons":8,…}), and which run found each lead.
+  await db.query(`ALTER TABLE runs ADD COLUMN IF NOT EXISTS brand_ready TEXT NOT NULL DEFAULT '{}'`);
+  await db.query('ALTER TABLE people ADD COLUMN IF NOT EXISTS run_id BIGINT');
   // Every search ever made and how deep it has gone, so each run picks new searches (or the next result pages)
   // instead of repeating the last run.
   await db.query(`CREATE TABLE IF NOT EXISTS searched_queries (
