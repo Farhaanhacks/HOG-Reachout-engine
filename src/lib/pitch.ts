@@ -20,9 +20,11 @@ export const PITCH = {
  *    also show an Unsubscribe button next to the sender's name. Opt-outs are copied back from Apollo.
  *  - reply: no link at all; the person replies "unsubscribe". Apollo stops the sequence on any reply, and replies Apollo
  *    classes as unsubscribe or not interested are never contacted again.
+ *  - button: an HTML email ending in a real Unsubscribe button that opens the person's own signed unsubscribe page.
+ *    Pasted into Apollo's raw HTML editor; Apollo's own opt-out line is turned off so there is only one.
  */
-export type UnsubscribeStyle = 'link' | 'apollo' | 'reply';
-export const UNSUBSCRIBE_STYLES: UnsubscribeStyle[] = ['link', 'apollo', 'reply'];
+export type UnsubscribeStyle = 'button' | 'link' | 'apollo' | 'reply';
+export const UNSUBSCRIBE_STYLES: UnsubscribeStyle[] = ['button', 'link', 'apollo', 'reply'];
 
 /**
  * The Apollo custom contact fields that carry each person's own email parts into the sequence. The team creates these
@@ -78,6 +80,7 @@ export const APOLLO_OPT_OUT = 'No longer interested in these messages? Unsubscri
 /** The last line of every email in the chosen style. `url` is the person's own unsubscribe link (link style only). */
 export function unsubscribeLine(style: UnsubscribeStyle, url: string): string {
   if (style === 'apollo') return APOLLO_OPT_OUT;
+  if (style === 'button') return 'No longer want these emails?  [ Unsubscribe ]';
   if (style === 'reply') return 'If you would rather not hear from us again, just reply "unsubscribe" and we will not contact you again.';
   return unsubscribeLineText(url);
 }
@@ -145,4 +148,31 @@ export function sequenceTemplate(style: UnsubscribeStyle = 'link'): { subject: s
       ...(style === 'apollo' ? [] : ['', unsubscribeLine(style, `{{${CUSTOM_FIELDS.unsubscribe}}}`)]),
     ].join('\n'),
   };
+}
+
+const escapeHtml = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/**
+ * The Unsubscribe button: a small, plain grey button (a loud coloured one looks like marketing to spam filters), built
+ * as a table so it shows as a button in Outlook too. `url` is the person's own unsubscribe link.
+ */
+export function unsubscribeButtonHtml(url: string): string {
+  return [
+    '<p style="margin:24px 0 8px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#777777;">No longer want these emails?</p>',
+    '<table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr>',
+    '<td style="border-radius:6px;background:#f2f3f5;border:1px solid #d5d8dc;">',
+    `<a href="${url}" target="_blank" style="display:inline-block;padding:8px 18px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;color:#333333;text-decoration:none;border-radius:6px;">Unsubscribe</a>`,
+    '</td></tr></table>',
+  ].join('\n');
+}
+
+/**
+ * The same email as sequenceTemplate, as HTML for Apollo's raw HTML editor, ending in the Unsubscribe button. Plain
+ * paragraphs only (no images, no colours, no fonts beyond the button), so it still reads like a personal email.
+ */
+export function sequenceTemplateHtml(): string {
+  const text = sequenceTemplate('reply').body.split('\n\n');
+  // The last paragraph of the text version is its unsubscribe line; the button replaces it.
+  const paragraphs = text.slice(0, -1).map((p) => `<p style="margin:0 0 14px;">${escapeHtml(p).replace(/\n/g, '<br>')}</p>`);
+  return [...paragraphs, unsubscribeButtonHtml(`{{${CUSTOM_FIELDS.unsubscribe}}}`)].join('\n');
 }

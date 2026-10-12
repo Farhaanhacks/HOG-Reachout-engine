@@ -5,7 +5,7 @@ import { getDb } from '../../../lib/db';
 import { syncMailboxes, type MailboxState } from '../../../lib/deliverability';
 import { fullEmail, heldBack, outreachDailyLimitFromEnv, outreachStatus, pendingOutreach, pushToApollo, sendTest, sendingRoom } from '../../../lib/outreach';
 import { personalizeNext, personalizeOne, setOpener } from '../../../lib/personalize';
-import { CUSTOM_FIELDS, sequenceTemplate } from '../../../lib/pitch';
+import { CUSTOM_FIELDS, sequenceTemplate, sequenceTemplateHtml } from '../../../lib/pitch';
 import { keysFromEnv } from '../../../lib/services';
 import { getSettings } from '../../../lib/settings';
 import { listPeople } from '../../../lib/store';
@@ -46,7 +46,7 @@ export async function GET(req: Request) {
       room,
       emailsPerPerson: settings.emailsPerPerson,
       missingFields: missing,
-      template: sequenceTemplate(settings.unsubscribeStyle),
+      template: { ...sequenceTemplate(settings.unsubscribeStyle), html: settings.unsubscribeStyle === 'button' ? sequenceTemplateHtml() : '' },
       unsubscribeStyle: settings.unsubscribeStyle,
       apolloError,
       status: await outreachStatus(db, dailyLimit),

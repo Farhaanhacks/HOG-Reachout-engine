@@ -6,7 +6,7 @@ import { EmailBadge, PersonName } from '../../components/badges';
 import type { Sequence } from '../../lib/apollo-sequences';
 import { api, formatDate, personalizeWaiting, post } from '../../lib/client';
 import type { OutreachStatus, PushSummary } from '../../lib/outreach';
-import { CUSTOM_FIELDS, type UnsubscribeStyle } from '../../lib/pitch';
+import { CUSTOM_FIELDS, unsubscribeButtonHtml, type UnsubscribeStyle } from '../../lib/pitch';
 import type { SavedPerson } from '../../lib/store';
 
 type Inbox = { id: string; email: string; domain: string; usable: boolean; room: number; newToday: number; addedToday: number; paused: string };
@@ -20,7 +20,7 @@ type Overview = {
   emailsPerPerson: number;
   unsubscribeStyle: UnsubscribeStyle;
   missingFields: string[];
-  template: { subject: string; body: string };
+  template: { subject: string; body: string; html: string };
   apolloError: string;
   status: OutreachStatus;
   held: SavedPerson[];
@@ -31,8 +31,9 @@ type Preview = SavedPerson & { preview: { subject: string; body: string } };
 const SEQUENCE_KEY = 'hog-apollo-sequence';
 
 const STYLES: { id: UnsubscribeStyle; label: string; hint: string }[] = [
-  { id: 'apollo', label: 'Unsubscribe button', hint: 'A clickable Unsubscribe at the bottom of every email (added by Apollo), plus the Gmail and Yahoo button by the sender name' },
-  { id: 'link', label: 'Our own link', hint: 'Signed link to this site; put the site on your own domain first' },
+  { id: 'button', label: 'Unsubscribe button', hint: 'A real button at the bottom of every email, opening their own unsubscribe page' },
+  { id: 'apollo', label: "Apollo's Unsubscribe link", hint: 'A clickable "Unsubscribe" word that Apollo adds after the signature' },
+  { id: 'link', label: 'Our own link, as text', hint: 'The unsubscribe address written out in the email' },
   { id: 'reply', label: 'Reply to unsubscribe', hint: 'No link in the email at all' },
 ];
 
@@ -304,6 +305,11 @@ export default function OutreachPage() {
                     </button>
                   ))}
                 </div>
+                {data.unsubscribeStyle === 'button' && (
+                  <p className="muted small" style={{ marginTop: 8 }}>
+                    In Apollo: Settings, Profile, Email settings, keep <b>one-click unsubscribe headers</b> on, turn <b>Append a sequences opt-out message</b> off (the button replaces it) and turn open and click tracking off. In each sequence step, open the editor&apos;s raw HTML view and paste the HTML below. Put this site on your own domain (<code>APP_URL</code>) so the button does not point to a vercel.app address.
+                  </p>
+                )}
                 {data.unsubscribeStyle === 'apollo' && (
                   <p className="muted small" style={{ marginTop: 8 }}>
                     In Apollo, open Settings, Profile, Email settings: keep <b>Include one-click unsubscribe headers</b> on, keep <b>Append a sequences opt-out message after my signature</b> on with the text <code>No longer interested in these messages? &lt;%Unsubscribe%&gt;</code>, and turn open and click tracking off. Every email then ends with a clickable Unsubscribe, and opt-outs are copied back here automatically.
@@ -323,7 +329,18 @@ export default function OutreachPage() {
               <div className="draft">
                 <pre>{data.template.body}</pre>
               </div>
-              <button onClick={() => copy('body', data.template.body)}>{copied === 'body' ? 'Copied' : 'Copy the email body'}</button>
+              {data.template.html ? (
+                <>
+                  <div className="row">
+                    <button className="primary" onClick={() => copy('html', data.template.html)}>{copied === 'html' ? 'Copied' : 'Copy the HTML (with the button)'}</button>
+                    <button onClick={() => copy('body', data.template.body)}>{copied === 'body' ? 'Copied' : 'Copy as plain text'}</button>
+                  </div>
+                  <div className="section-label">How the button looks</div>
+                  <div style={{ background: '#ffffff', color: '#222222', borderRadius: 9, padding: '14px 16px' }} dangerouslySetInnerHTML={{ __html: unsubscribeButtonHtml('#') }} />
+                </>
+              ) : (
+                <button onClick={() => copy('body', data.template.body)}>{copied === 'body' ? 'Copied' : 'Copy the email body'}</button>
+              )}
             </>
           )}
         </section>

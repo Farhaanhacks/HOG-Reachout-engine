@@ -3,7 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { listSequences } from '../src/lib/apollo-sequences';
 import type { Person } from '../src/lib/linkedin';
 import { APOLLO_LABEL, fullEmail, outreachStatus, pushToApollo, sendTest, toApolloContact } from '../src/lib/outreach';
-import { sequenceTemplate } from '../src/lib/pitch';
+import { sequenceTemplate, sequenceTemplateHtml } from '../src/lib/pitch';
 import type { Services } from '../src/lib/services';
 import { savePeople, type Db } from '../src/lib/store';
 import { importSuppression } from '../src/lib/suppression';
@@ -179,6 +179,21 @@ describe('price and unsubscribe styles', () => {
     expect(sequenceTemplate('link').body).toContain('{{HOG Unsubscribe link}}');
     const p = { id: 7, name: 'A B', title: 'CEO', company: 'Acme', email: 'a@acme.com', opener: 'x.' };
     expect(fullEmail(p, { style: 'reply' }).body).not.toContain('http');
+  });
+});
+
+describe('unsubscribe button', () => {
+  it('builds an HTML email that ends in a real Unsubscribe button to the person\'s own link, and nothing else links out', () => {
+    const html = sequenceTemplateHtml();
+    expect(html).toContain('<a href="{{HOG Unsubscribe link}}"');
+    expect(html.trim().endsWith('</td></tr></table>')).toBe(true);
+    expect(html).toContain('>Unsubscribe</a>');
+    expect(html.match(/<a /g)).toHaveLength(1);
+    expect(html).toContain('<p style="margin:0 0 14px;">{{HOG Opener}}</p>');
+    expect(html).toContain('USD 2,500');
+    expect(html).not.toContain('reply "unsubscribe"');
+    const p = { id: 7, name: 'A B', title: 'CEO', company: 'Acme', email: 'a@acme.com', opener: 'x.' };
+    expect(fullEmail(p, { style: 'button' }).body.endsWith('[ Unsubscribe ]')).toBe(true);
   });
 });
 

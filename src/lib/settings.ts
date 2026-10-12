@@ -9,7 +9,7 @@ import { DEFAULT_EDITIONS, DEFAULT_RULES, cleanEditions, cleanRules, type Editio
  */
 export type Settings = { rules: TitleRules; editions: Edition[]; emailsPerPerson: number; unsubscribeStyle: UnsubscribeStyle };
 
-export const DEFAULT_SETTINGS: Settings = { rules: DEFAULT_RULES, editions: DEFAULT_EDITIONS, emailsPerPerson: 3, unsubscribeStyle: 'apollo' };
+export const DEFAULT_SETTINGS: Settings = { rules: DEFAULT_RULES, editions: DEFAULT_EDITIONS, emailsPerPerson: 3, unsubscribeStyle: 'button' };
 
 export function cleanUnsubscribeStyle(v: unknown): UnsubscribeStyle {
   return UNSUBSCRIBE_STYLES.find((s) => s === v) ?? DEFAULT_SETTINGS.unsubscribeStyle;
