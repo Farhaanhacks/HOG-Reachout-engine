@@ -15,8 +15,9 @@ const FIELDS = [
   { id: 'f-unsub', name: 'HOG Unsubscribe link', modality: 'contact' },
   { id: 'f-edition', name: 'HOG Edition', modality: 'contact' },
   { id: 'f-industry', name: 'HOG Industry', modality: 'contact' },
+  { id: 'f-role', name: 'HOG Role', modality: 'contact' },
 ];
-const fieldIds = { subject: 'f-subject', opener: 'f-opener', unsubscribe: 'f-unsub', edition: 'f-edition', industry: 'f-industry' };
+const fieldIds = { subject: 'f-subject', opener: 'f-opener', unsubscribe: 'f-unsub', edition: 'f-edition', industry: 'f-industry', role: 'f-role' };
 
 /** Inboxes for the three brands, like the team's. */
 const ACCOUNTS = [
@@ -120,9 +121,18 @@ const rowOf = async (slug: string) =>
 const push = (svc: Services, extra: Partial<{ limit: number; dailyLimit: number }> = {}) => pushToApollo(svc, db, { sequenceId: 'seq-1', limit: 25, ...extra });
 
 describe('the Apollo contact and email', () => {
-  it('puts the subject, opener, edition, industry line and unsubscribe link in the custom fields', () => {
+  it('puts the subject, congratulations line, role, edition, industry line and unsubscribe link in the custom fields', () => {
     const c = toApolloContact(
-      { id: 7, name: 'Dr. Ahmed Al Sayed', title: 'CEO', company: 'Acme', email: 'a@acme.com', opener: 'Your Riyadh office caught our eye.', industry: 'hospital & health care' },
+      {
+        id: 7,
+        name: 'Dr. Ahmed Al Sayed',
+        title: 'CEO',
+        company: 'Acme',
+        email: 'a@acme.com',
+        opener: "Congratulations on Acme's expansion into Riyadh!",
+        industry: 'hospital & health care',
+        edition_name: 'Top HealthTech Leaders to Watch in 2026',
+      },
       fieldIds,
     );
     expect(c).toEqual({
@@ -133,67 +143,75 @@ describe('the Apollo contact and email', () => {
       title: 'CEO',
       label_names: [APOLLO_LABEL],
       typed_custom_fields: {
-        'f-subject': "Featuring Acme's leadership story",
-        'f-opener': 'Your Riyadh office caught our eye.',
-        'f-unsub': unsubscribeUrl(7),
-        'f-edition': 'Healthcare Leaders Edition',
+        'f-subject': 'Cover Story invite for Acme',
+        'f-opener': "Congratulations on Acme's expansion into Riyadh!",
+        'f-role': 'your role as CEO at Acme',
+        'f-edition': 'Top HealthTech Leaders to Watch in 2026',
         'f-industry': 'Healthcare Leaders',
+        'f-unsub': unsubscribeUrl(7),
       },
     });
   });
 
-  it('never leaves the opener empty, and gives leads of an unknown industry the general edition', () => {
-    const c = toApolloContact({ id: 8, name: 'B C', title: 'Founder', company: 'Beta', email: 'b@beta.com', opener: '' }, fieldIds);
-    expect(c.typed_custom_fields['f-opener']).toBe('Leading Beta as Founder puts you among the leaders our readers want to hear from.');
-    expect(c.typed_custom_fields['f-edition']).toBe('Global Leaders Edition');
+  it('never leaves a field empty: a congratulations line from the company, and the edition table for the industry', () => {
+    const c = toApolloContact({ id: 8, name: 'B C', title: 'Founder', company: 'Beta', email: 'b@beta.com', opener: '', industry: 'banking' }, fieldIds);
+    expect(c.typed_custom_fields['f-opener']).toBe('Congratulations on your continued leadership at Beta!');
+    expect(c.typed_custom_fields['f-edition']).toBe(`Top Fintech and Finance Players to Look Out For in ${new Date().getFullYear()}`);
   });
 
-  it('previews the email exactly as the sequence template renders it', () => {
-    const e = fullEmail({ id: 7, name: 'Ahmed Al Sayed', title: 'CEO', company: 'Acme', email: 'a@acme.com', opener: 'Your Riyadh office caught our eye.', industry: 'computer & network security' });
-    const t = sequenceTemplate();
-    const rendered = t.body
-      .replace('{{#if first_name}}{{first_name}}{{#else}}there{{#endif}}', 'Ahmed')
-      .replace('{{contact.HOG Opener}}', 'Your Riyadh office caught our eye.')
-      .replace('{{contact.HOG Edition}}', 'Cybersecurity Leaders Edition')
-      .replace('{{contact.HOG Industry}}', 'Cybersecurity Leaders')
-      .replace('{{contact.HOG Unsubscribe link}}', unsubscribeUrl(7));
-    expect(e.body).toBe(rendered);
-    expect(t.subject).toBe('{{contact.HOG Subject}}');
-  });
-});
-
-describe('price and unsubscribe styles', () => {
-  it('states the USD 2,500 cover price in every email', () => {
-    const e = fullEmail({ id: 7, name: 'A B', title: 'CEO', company: 'Acme', email: 'a@acme.com', opener: 'Your Riyadh office caught our eye.' });
-    expect(e.body).toContain('A cover feature, with your story on the cover of the edition, is USD 2,500.');
-    expect(sequenceTemplate().body).toContain('USD 2,500');
-  });
-
-  it("leaves the clickable Unsubscribe to Apollo, or ends with a reply-to-unsubscribe line, or the engine's own link", () => {
-    // Apollo appends its own clickable Unsubscribe after the signature, so the template ends with the pitch.
-    expect(sequenceTemplate('apollo').body.endsWith('I will send over the details.')).toBe(true);
-    expect(sequenceTemplate('apollo').body).not.toContain('opt_out_message');
-    const reply = sequenceTemplate('reply').body;
-    expect(reply).toContain('just reply "unsubscribe"');
-    expect(reply).not.toMatch(/https?:|\{\{HOG Unsubscribe link\}\}/);
-    expect(sequenceTemplate('link').body).toContain('{{contact.HOG Unsubscribe link}}');
-    const p = { id: 7, name: 'A B', title: 'CEO', company: 'Acme', email: 'a@acme.com', opener: 'x.' };
-    expect(fullEmail(p, { style: 'reply' }).body).not.toContain('http');
+  it("previews the email exactly as the brand's sequence template renders it, for both versions", () => {
+    const p = { id: 7, name: 'Ahmed Al Sayed', title: 'CEO', company: 'Acme', email: 'a@acme.com', opener: 'Congratulations on your Riyadh office!', edition_name: 'Top Cyber Leaders to Watch in 2026', brand: 'gulficons' };
+    for (const variant of ['A', 'B'] as const) {
+      const e = fullEmail(p, { variant, senderName: 'Ava Williams' });
+      const t = sequenceTemplate('gulficons', variant, 'button');
+      const rendered = t.body
+        .replace('{{#if first_name}}{{first_name}}{{#else}}Sir or Madam{{#endif}}', 'Ahmed')
+        .replace('{{contact.HOG Opener}}', 'Congratulations on your Riyadh office!')
+        .replace('{{contact.HOG Role}}', 'your role as CEO at Acme')
+        .replace('{{contact.HOG Edition}}', 'Top Cyber Leaders to Watch in 2026')
+        .replace('{{sender_first_name}} {{sender_last_name}}', 'Ava Williams');
+      expect(e.body).toBe(rendered);
+    }
+    expect(sequenceTemplate().subject).toBe('{{contact.HOG Subject}}');
   });
 });
 
-describe('unsubscribe button', () => {
-  it('builds an HTML email that ends in a real Unsubscribe button to the person\'s own link, and nothing else links out', () => {
-    const html = sequenceTemplateHtml();
+describe('the Cover Story template', () => {
+  it("names the brand and its website, and lists the profile's contents with the brand's own website", () => {
+    const t = sequenceTemplate('ciominds', 'B').body;
+    expect(t).toContain('At CIO Minds, we take pride');
+    expect(t).toContain('Banner and sidebar advertisements on the CIO Minds website');
+    expect(t).toContain('Website: ciominds.com');
+    expect(t).toContain('Office: +1 (253) 338-0280');
+    expect(t).toContain('WhatsApp: +1 253-338-0280');
+    expect(t).toContain('Business Development Manager');
+    expect(sequenceTemplate('hog', 'B').body).toContain('At Humans of Globe, we take pride');
+    expect(sequenceTemplate('gulficons', 'B').body).toContain('Website: gulficons.com');
+  });
+
+  it('shows the featuring fee only in version A, just before "We believe your story…"', () => {
+    const a = sequenceTemplate('hog', 'A').body;
+    const b = sequenceTemplate('hog', 'B').body;
+    expect(a).toContain('Proposed Featuring Fee: USD 2500\n\nWe believe your story would make a valuable addition');
+    expect(b).not.toContain('Featuring Fee');
+    expect(a.replace('Proposed Featuring Fee: USD 2500\n\n', '')).toBe(b); // nothing else differs
+  });
+
+  it('ends with the chosen way to unsubscribe', () => {
+    expect(sequenceTemplate('hog', 'A', 'reply').body).toContain('just reply "unsubscribe"');
+    expect(sequenceTemplate('hog', 'A', 'link').body).toContain('{{contact.HOG Unsubscribe link}}');
+    expect(sequenceTemplate('hog', 'A', 'apollo').body.endsWith('Website: humansofglobe.com')).toBe(true);
+  });
+
+  it('builds HTML with bold lines, a bullet list and a real Unsubscribe button, and no other link', () => {
+    const html = sequenceTemplateHtml('hog', 'A');
+    expect(html).toContain('<p style="margin:0 0 14px;"><strong>{{contact.HOG Opener}}</strong></p>');
+    expect(html).toContain('<strong>Proposed Featuring Fee: USD 2500</strong>');
+    expect(html).toContain('<li style="margin:0 0 4px;">Five complimentary printed copies</li>');
     expect(html).toContain('<a href="{{contact.HOG Unsubscribe link}}"');
-    expect(html.trim().endsWith('</td></tr></table>')).toBe(true);
-    expect(html).toContain('>Unsubscribe</a>');
     expect(html.match(/<a /g)).toHaveLength(1);
-    expect(html).toContain('<p style="margin:0 0 14px;">{{contact.HOG Opener}}</p>');
-    expect(html).toContain('USD 2,500');
-    expect(html).not.toContain('reply "unsubscribe"');
-    const p = { id: 7, name: 'A B', title: 'CEO', company: 'Acme', email: 'a@acme.com', opener: 'x.' };
-    expect(fullEmail(p, { style: 'button' }).body.endsWith('[ Unsubscribe ]')).toBe(true);
+    expect(html).toContain('{{sender_first_name}} {{sender_last_name}}<br>Business Development Manager<br>Humans of Globe');
+    expect(sequenceTemplateHtml('hog', 'B')).not.toContain('Featuring Fee');
   });
 });
 
@@ -303,7 +321,7 @@ describe('pushToApollo', () => {
   it('refuses to send while the custom fields are missing', async () => {
     await seed({ a: {} });
     const { svc, contacts } = fakeApollo({ fields: FIELDS.slice(0, 3) });
-    await expect(push(svc)).rejects.toThrow('Create these custom contact fields in Apollo first: HOG Edition, HOG Industry.');
+    await expect(push(svc)).rejects.toThrow('Create these custom contact fields in Apollo first: HOG Role, HOG Edition, HOG Industry.');
     expect(contacts).toHaveLength(0);
   });
 
@@ -343,9 +361,9 @@ describe('sendTest', () => {
 });
 
 describe('subject', () => {
-  it('writes the possessive correctly for names ending in s', async () => {
+  it('invites the company to a Cover Story', async () => {
     const { subjectFor } = await import('../src/lib/pitch');
-    expect(subjectFor('DAMAC Properties')).toBe("Featuring DAMAC Properties' leadership story");
-    expect(subjectFor('Acme')).toBe("Featuring Acme's leadership story");
+    expect(subjectFor('DAMAC Properties')).toBe('Cover Story invite for DAMAC Properties');
+    expect(subjectFor('')).toBe('Cover Story invite');
   });
 });

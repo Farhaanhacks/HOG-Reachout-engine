@@ -2,28 +2,33 @@ import { askDeepSeekJson } from './ai';
 import { isGeo } from './geo';
 import { glForCountry } from './markets';
 import { newsSearch, mapLimit, type NewsResult, type Services } from './services';
+import { fallbackOpenerFor } from './pitch';
 import { READY_SQL, ensureSchema, type Db } from './store';
 
 /**
- * Personal openers: one or two sentences per lead that show we know something specific and true about them or their
- * company, written by DeepSeek from the lead's LinkedIn snippet and their company's recent news.
+ * The personal parts of each email, written by DeepSeek from the lead's LinkedIn snippet and their company's recent
+ * news: the achievement the email opens by congratulating them on ("Congratulations on <achievement>!"), and the name
+ * of the special edition they are shortlisted for ("Top Fintech Players to Look Out For in 2026").
  *
  * Data rule: DeepSeek never receives the person's name or email. Their name is replaced with "the person" in everything
- * sent, and the opener speaks to them as "you".
+ * sent.
  */
 
-export const SYSTEM_PROMPT = `You write the opening line of a cold email from Humans of Globe, a media brand that publishes in-depth stories about business leaders in print, online and on its podcast.
+export function systemPrompt(year: number): string {
+  return `You help write a cold email inviting a business leader to a Cover Story Profile in a business magazine.
 
-You get facts about one leader, called "the person", and their company. Write one or two sentences, at most 45 words, addressed to them as "you" / "your", that show we know something specific and true about them or their company.
+You get facts about one leader, called "the person", and their company. Write two things:
+
+1. "achievement": what the email congratulates them on. It completes the sentence "Congratulations on ___!". A short noun phrase, at most 18 words, about one concrete, recent and true fact: a launch, expansion, funding round, deal, partnership, award or milestone of theirs or their company. Write it about the company or "your" (for example "Acme's expansion into Saudi Arabia" or "your appointment as CEO of Acme"). If the facts hold nothing specific beyond their job title and company, return "".
+
+2. "edition": the name of the special edition they are shortlisted for, tied to their company's field, at most 9 words, ending with "in ${year}". For example "Top Fintech Players to Look Out For in ${year}" or "Top Logistics Innovators to Watch in ${year}". Name the field, never the person or the company.
 
 Rules:
 - Use only the facts given. Never invent numbers, dates, awards or events.
-- Refer to one concrete fact: a launch, expansion, funding, deal, award, milestone or something from their profile.
-- Plain, warm, professional tone. No flattery words (impressive, amazing, incredible, inspiring), no exclamation marks, no questions, no links, no emojis.
-- Do not mention Humans of Globe or ask for anything; the rest of the email does that.
-- If the facts hold nothing specific beyond their job title and company, write about them leading that company, adding nothing that is not in the facts.
+- Plain, professional wording. No flattery words (impressive, amazing, incredible, inspiring), no exclamation marks, no questions, no links, no emojis, no quotation marks.
 
-Reply with JSON only: {"opener": "...", "fact_used": "the fact you referred to, in a few words"}`;
+Reply with JSON only: {"achievement": "...", "edition": "...", "fact_used": "the fact you referred to, in a few words"}`;
+}
 
 type Lead = { id: number | string; name: string; title: string; company: string; geo: string; country?: string; industry?: string; snippet: string };
 
@@ -53,22 +58,37 @@ export function factsFor(lead: Lead, news: NewsResult[]): string {
   return lines.filter(Boolean).join('\n');
 }
 
-/** An opener is usable only if it is short, plain text, and does not leak placeholders or links. */
-export function cleanOpener(raw: unknown): string {
-  const s = String(raw ?? '').replace(/\s+/g, ' ').trim();
-  if (!s || s.length > 320) return '';
-  if (/https?:|www\.|[{}[\]<>]|the person|!|\?/i.test(s)) return '';
-  if (/\b(impressive|amazing|incredible|inspiring)\b/i.test(s)) return '';
+const UNSAFE = /https?:|www\.|[{}[\]<>"“”]|the person|!|\?/i;
+const FLATTERY = /\b(impressive|amazing|incredible|inspiring)\b/i;
+
+/** An achievement is usable only if it is a short plain phrase. "Congratulations on" and end punctuation are trimmed. */
+export function cleanAchievement(raw: unknown): string {
+  const s = String(raw ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^congratulations( to you)? on\s+/i, '')
+    .replace(/[.!,;:\s]+$/, '');
+  if (!s || s.length > 160 || s.split(' ').length > 22) return '';
+  if (UNSAFE.test(s) || FLATTERY.test(s)) return '';
   return s;
 }
 
-/** The opener when no news or profile fact can be used: built from their role and company only, so it is never wrong. */
+/** An edition name is usable only if it is short, plain and names a year. */
+export function cleanEdition(raw: unknown): string {
+  const s = String(raw ?? '').replace(/\s+/g, ' ').trim().replace(/[.!,;:\s]+$/, '');
+  if (!s || s.length > 80 || s.split(' ').length > 12 || !/\b20\d\d\b/.test(s)) return '';
+  if (UNSAFE.test(s) || FLATTERY.test(s)) return '';
+  return s;
+}
+
+/** The opening line: "Congratulations on <achievement>!", or on their leadership at their company when nothing specific was found. */
+export function openerFor(achievement: string, company: string): string {
+  return achievement ? `Congratulations on ${achievement}!` : fallbackOpenerFor(company);
+}
+
+/** The opener when no news or profile fact can be used: built from their company only, so it is never wrong. */
 export function fallbackOpener(lead: { title: string; company: string }): string {
-  const title = lead.title.trim();
-  const company = lead.company.trim();
-  if (title && company) return `Leading ${company} as ${title} puts you among the leaders our readers want to hear from.`;
-  if (company) return `Your work at ${company} puts you among the leaders our readers want to hear from.`;
-  return 'Your leadership journey is the kind of story our readers want to hear.';
+  return fallbackOpenerFor(lead.company);
 }
 
 export type PersonalizeSummary = { done: number; none: number; failed: number; searches: number; error?: string };
@@ -115,7 +135,7 @@ export async function personalizeNext(svc: Services, db: Db, limit: number): Pro
  * Searches go to Google through Serper; only what DeepSeek sees is stripped of the name. Throws when Serper or DeepSeek
  * cannot be reached, leaving the lead as it was.
  */
-async function personalizeLead(svc: Services, db: Db, lead: Lead): Promise<{ opener: string; fact: string; searches: number }> {
+async function personalizeLead(svc: Services, db: Db, lead: Lead): Promise<{ opener: string; fact: string; edition: string; searches: number }> {
   const geo = isGeo(lead.geo) && !lead.country ? lead.geo : glForCountry(lead.country);
   const news: NewsResult[] = [];
   let searches = 0;
@@ -134,17 +154,23 @@ async function personalizeLead(svc: Services, db: Db, lead: Lead): Promise<{ ope
   }
   let reply: Awaited<ReturnType<typeof askDeepSeekJson>>;
   try {
-    reply = await askDeepSeekJson(svc, SYSTEM_PROMPT, factsFor(lead, news));
+    reply = await askDeepSeekJson(svc, systemPrompt(new Date().getFullYear()), factsFor(lead, news));
   } catch (e) {
     throw Object.assign(e as Error, { searches });
   }
   // Every lead gets an opener: from the news or their profile when DeepSeek finds something, otherwise from their
-  // role and company. Nobody is held back.
-  const written = cleanOpener(reply?.opener);
-  const opener = written || fallbackOpener(lead);
-  const fact = written ? String(reply?.fact_used ?? '').slice(0, 200) : 'role and company (no news found)';
-  await db.query("UPDATE people SET opener = $2, opener_fact = $3, opener_status = 'done', personalized_at = now() WHERE id = $1", [lead.id, opener, fact]);
-  return { opener, fact, searches };
+  // company. Nobody is held back. Without an edition name, the edition table's one for their industry is used.
+  const achievement = cleanAchievement(reply?.achievement);
+  const opener = openerFor(achievement, lead.company);
+  const edition = cleanEdition(reply?.edition);
+  const fact = achievement ? String(reply?.fact_used ?? '').slice(0, 200) : 'role and company (no news found)';
+  await db.query("UPDATE people SET opener = $2, opener_fact = $3, edition_name = $4, opener_status = 'done', personalized_at = now() WHERE id = $1", [
+    lead.id,
+    opener,
+    fact,
+    edition,
+  ]);
+  return { opener, fact, edition, searches };
 }
 
 /**

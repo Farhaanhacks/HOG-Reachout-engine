@@ -1,12 +1,12 @@
 import { addToSequence, createContact, findCustomFields, missingFields, skipReason, type ApolloContactInput, type FieldIds } from './apollo-sequences';
-import { BRANDS, brandOfEmail, type Brand } from './brands';
+import { BRANDS, brandOfEmail, isBrand, type Brand } from './brands';
 import { allocate, autoPause, mailboxStates, syncMailboxes, type MailboxState } from './deliverability';
-import { fallbackOpener, personalizeNext } from './personalize';
-import { draftEmail, unsubscribeLine, type UnsubscribeStyle } from './pitch';
+import { personalizeNext } from './personalize';
+import { draftEmail, fallbackOpenerFor, firstNameOf, roleFor, subjectFor, unsubscribeLine, type UnsubscribeStyle, type Variant } from './pitch';
 import { mapLimit, type Services } from './services';
 import { getSettings } from './settings';
 import { PERSON_COLUMNS, READY_SQL, ensureSchema, type Db, type SavedPerson } from './store';
-import { editionFor, type Edition } from './targeting';
+import { editionFor, editionTitle, type Edition } from './targeting';
 import { syncIfStale } from './tracking';
 import { TEST_ID, unsubscribeUrl } from './unsubscribe';
 
@@ -22,39 +22,47 @@ export function outreachDailyLimitFromEnv(): number {
 /** The label every contact the engine creates in Apollo gets, so the team can find them there. */
 export const APOLLO_LABEL = 'Humans of Globe lead engine';
 
-type ContactSource = Pick<SavedPerson, 'id' | 'name' | 'title' | 'company' | 'email' | 'opener'> & { industry?: string; segment?: string };
+type ContactSource = Pick<SavedPerson, 'id' | 'name' | 'title' | 'company' | 'email' | 'opener'> & {
+  industry?: string;
+  segment?: string;
+  edition_name?: string;
+  brand?: string;
+};
 
-/** The edition a lead is pitched for: from their industry, by the edition table. */
-function editionOf(p: ContactSource, editions?: Edition[]): Edition {
-  return editionFor(p.industry, editions);
-}
-
-/** The personal parts of a person's email, as they go into Apollo's custom fields. */
+/**
+ * The personal parts of a person's email, as they go into Apollo's custom fields: the subject, the congratulations
+ * line, their role, the edition they are shortlisted for (from the news research, or the edition table for their
+ * industry), the industry line and their unsubscribe link.
+ */
 export function emailParts(p: ContactSource, opts: { unsubscribeId?: number | string; editions?: Edition[] } = {}) {
-  const d = draftEmail(p);
-  const e = editionOf(p, opts.editions);
+  const e = editionFor(p.industry, opts.editions);
   return {
-    subject: d.subject,
-    opener: p.opener?.trim() || fallbackOpener(p),
-    unsubscribe: unsubscribeUrl(opts.unsubscribeId ?? p.id),
-    edition: e.edition,
+    subject: subjectFor(p.company),
+    opener: p.opener?.trim() || fallbackOpenerFor(p.company),
+    role: roleFor(p.title, p.company),
+    edition: p.edition_name?.trim() || editionTitle(e),
     industry: e.industryLine,
+    unsubscribe: unsubscribeUrl(opts.unsubscribeId ?? p.id),
   };
 }
 
-/** The full email a person will receive, as the sequence template renders it. For previews. */
-export function fullEmail(p: ContactSource, opts: { unsubscribeId?: number | string; editions?: Edition[]; style?: UnsubscribeStyle } = {}): { subject: string; body: string } {
+/** The full email a person will receive (version A unless asked), as their brand's sequence template renders it. For previews. */
+export function fullEmail(
+  p: ContactSource,
+  opts: { unsubscribeId?: number | string; editions?: Edition[]; style?: UnsubscribeStyle; variant?: Variant; senderName?: string } = {},
+): { subject: string; body: string } {
   const parts = emailParts(p, opts);
-  const d = draftEmail({ ...p, opener: parts.opener, edition: parts.edition, industryLine: parts.industry });
-  return { subject: parts.subject, body: `${d.body}\n\n${unsubscribeLine(opts.style ?? 'link', parts.unsubscribe)}` };
+  const brand: Brand = isBrand(p.brand) ? p.brand : 'hog';
+  const d = draftEmail({ ...p, opener: parts.opener, edition: parts.edition, brand, variant: opts.variant ?? 'A', senderName: opts.senderName });
+  return { subject: parts.subject, body: `${d.body}\n\n${unsubscribeLine(opts.style ?? 'button', parts.unsubscribe)}` };
 }
 
 /** A saved person as an Apollo contact, with their personal parts in the custom fields. */
 export function toApolloContact(p: ContactSource, fields: FieldIds, opts: { unsubscribeId?: number | string; organizationName?: string; editions?: Edition[] } = {}): ApolloContactInput {
-  const d = draftEmail(p);
+  const firstName = firstNameOf(p.name);
   const parts = emailParts(p, opts);
   const words = p.name.trim().split(/\s+/).filter(Boolean);
-  const at = words.findIndex((w) => w.toLowerCase() === d.firstName.toLowerCase());
+  const at = words.findIndex((w) => w.toLowerCase() === firstName.toLowerCase());
   const lastName = at >= 0 ? words.slice(at + 1).join(' ') : words.slice(1).join(' ');
   const custom: Record<string, string> = {};
   for (const k of Object.keys(parts) as (keyof typeof parts)[]) {
@@ -62,7 +70,7 @@ export function toApolloContact(p: ContactSource, fields: FieldIds, opts: { unsu
     if (id) custom[id] = parts[k];
   }
   const contact: ApolloContactInput = { email: p.email, label_names: [APOLLO_LABEL], typed_custom_fields: custom };
-  if (d.firstName !== 'there') contact.first_name = d.firstName;
+  if (firstName) contact.first_name = firstName;
   if (lastName) contact.last_name = lastName;
   const organization = opts.organizationName ?? p.company;
   if (organization) contact.organization_name = organization;

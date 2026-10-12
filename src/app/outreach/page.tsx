@@ -7,7 +7,7 @@ import type { Sequence } from '../../lib/apollo-sequences';
 import { api, formatDate, personalizeWaiting, post } from '../../lib/client';
 import type { OutreachStatus, PushSummary } from '../../lib/outreach';
 import type { Brand } from '../../lib/brands';
-import { CUSTOM_FIELDS, unsubscribeButtonHtml, type UnsubscribeStyle } from '../../lib/pitch';
+import { CUSTOM_FIELDS, FEE_LINE, VARIANT_LABEL, unsubscribeButtonHtml, type UnsubscribeStyle, type Variant } from '../../lib/pitch';
 import type { SavedPerson } from '../../lib/store';
 
 type Inbox = { id: string; email: string; domain: string; usable: boolean; room: number; newToday: number; addedToday: number; paused: string };
@@ -24,7 +24,7 @@ type Overview = {
   emailsPerPerson: number;
   unsubscribeStyle: UnsubscribeStyle;
   missingFields: string[];
-  template: { subject: string; body: string; html: string };
+  template: { subject: string; versions: { variant: Variant; body: string; html: string }[] };
   apolloError: string;
   status: OutreachStatus;
   held: SavedPerson[];
@@ -319,9 +319,12 @@ export default function OutreachPage() {
               .{' '}
               {data && data.configured && !data.apolloError && (data.missingFields.length ? <span className="badge warn">{data.missingFields.length} missing</span> : <span className="badge ok">All found</span>)}
             </li>
-            <li>Connect all 6 inboxes under Settings, Mailboxes, and turn on warm-up for each one. Set each inbox&apos;s daily limit in Apollo to match the Deliverability page.</li>
+            <li>Connect this brand&apos;s inboxes under Settings, Mailboxes, and turn on warm-up for each one. Set each inbox&apos;s daily limit in Apollo to match the Deliverability page.</li>
             <li>
               Create a sequence with automatic email steps ({data?.emailsPerPerson ?? 3} emails per person, as set on the Targeting page). Paste the subject and body below into the first step, and keep the unsubscribe line in every step. Re-insert each <code>{'{{…}}'}</code> field with Apollo&apos;s <code>{'{ }'}</code> variable picker if it does not turn into a variable.
+            </li>
+            <li>
+              The template carries the signature, with the sender&apos;s name from Apollo&apos;s <code>{'{{sender_first_name}} {{sender_last_name}}'}</code>: untick <b>Include signature</b> in the step, and if those two show in red, re-insert them from the variable picker&apos;s <b>Sender</b> tab.
             </li>
             <li>Send a test to your own inbox, check it, then activate the sequence.</li>
           </ol>
@@ -358,20 +361,29 @@ export default function OutreachPage() {
                 <code>{data.template.subject}</code>
                 <button className="link small" onClick={() => copy('subject', data.template.subject)}>{copied === 'subject' ? 'Copied' : 'Copy'}</button>
               </div>
-              <div className="draft">
-                <pre>{data.template.body}</pre>
-              </div>
-              {data.template.html ? (
-                <>
-                  <div className="row">
-                    <button className="primary" onClick={() => copy('html', data.template.html)}>{copied === 'html' ? 'Copied' : 'Copy the HTML (with the button)'}</button>
-                    <button onClick={() => copy('body', data.template.body)}>{copied === 'body' ? 'Copied' : 'Copy as plain text'}</button>
+              <p className="muted small">
+                A/B test: paste version A into the step&apos;s <b>Test A</b> and version B into <b>+ Add test</b> (Test B) of the same step. Apollo splits people evenly between them; the Results page compares them by whether the email showed &quot;{FEE_LINE}&quot;.
+              </p>
+              {data.template.versions.map((v) => (
+                <div key={v.variant} className="draft">
+                  <div className="card-head">
+                    <b>{VARIANT_LABEL[v.variant]}</b>
+                    <div className="row">
+                      {v.html && <button className="primary" onClick={() => copy(`html-${v.variant}`, v.html)}>{copied === `html-${v.variant}` ? 'Copied' : 'Copy the HTML'}</button>}
+                      <button onClick={() => copy(`body-${v.variant}`, v.body)}>{copied === `body-${v.variant}` ? 'Copied' : 'Copy as plain text'}</button>
+                    </div>
                   </div>
+                  <details>
+                    <summary>Show the email</summary>
+                    <pre>{v.body}</pre>
+                  </details>
+                </div>
+              ))}
+              {data.template.versions[0]?.html && (
+                <>
                   <div className="section-label">How the button looks</div>
                   <div style={{ background: '#ffffff', color: '#222222', borderRadius: 9, padding: '14px 16px' }} dangerouslySetInnerHTML={{ __html: unsubscribeButtonHtml('#') }} />
                 </>
-              ) : (
-                <button onClick={() => copy('body', data.template.body)}>{copied === 'body' ? 'Copied' : 'Copy the email body'}</button>
               )}
             </>
           )}

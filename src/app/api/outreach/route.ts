@@ -7,6 +7,7 @@ import { syncMailboxes, type MailboxState } from '../../../lib/deliverability';
 import { fullEmail, heldBack, outreachDailyLimitFromEnv, outreachStatus, pendingOutreach, pushToApollo, sendTest, sendingRoom } from '../../../lib/outreach';
 import { personalizeNext, personalizeOne, setOpener } from '../../../lib/personalize';
 import { CUSTOM_FIELDS, sequenceTemplate, sequenceTemplateHtml } from '../../../lib/pitch';
+import type { Variant } from '../../../lib/pitch';
 import { keysFromEnv } from '../../../lib/services';
 import { getSettings } from '../../../lib/settings';
 import { listPeople } from '../../../lib/store';
@@ -51,7 +52,15 @@ export async function GET(req: Request) {
       room,
       emailsPerPerson: settings.emailsPerPerson,
       missingFields: missing,
-      template: { ...sequenceTemplate(settings.unsubscribeStyle), html: settings.unsubscribeStyle === 'button' ? sequenceTemplateHtml() : '' },
+      // Version A shows the featuring fee, version B does not (Test A and Test B in the same Apollo step).
+      template: {
+        subject: sequenceTemplate(brand).subject,
+        versions: (['A', 'B'] as Variant[]).map((v) => ({
+          variant: v,
+          body: sequenceTemplate(brand, v, settings.unsubscribeStyle).body,
+          html: settings.unsubscribeStyle === 'button' ? sequenceTemplateHtml(brand, v) : '',
+        })),
+      },
       unsubscribeStyle: settings.unsubscribeStyle,
       apolloError,
       status: await outreachStatus(db, dailyLimit, brand),
@@ -106,7 +115,8 @@ export async function POST(req: Request) {
     if (body.action === 'preview') {
       const { editions, unsubscribeStyle } = await getSettings(db);
       const people = await pendingOutreach(db, limit, brand);
-      return NextResponse.json({ people: people.map((p) => ({ ...p, preview: fullEmail(p, { editions, style: unsubscribeStyle }) })) });
+      // Half the people get version B; the preview shows A and B alternately so both can be checked.
+      return NextResponse.json({ people: people.map((p, i) => ({ ...p, preview: fullEmail(p, { editions, style: unsubscribeStyle, variant: i % 2 ? 'B' : 'A' }) })) });
     }
     if (body.action === 'push') {
       if (body.confirm !== true) return NextResponse.json({ error: 'Adding people to a sequence starts real emails: send confirm true.' }, { status: 400 });

@@ -4,31 +4,25 @@ import { draftEmail, firstNameOf } from '../src/lib/pitch';
 import { sizeVerdict } from '../src/lib/size';
 
 describe('draftEmail', () => {
-  it('uses the first name, title and company', () => {
-    const d = draftEmail({ name: 'Jason English', title: 'CEO', company: 'CG Tech' });
-    expect(d.subject).toBe("Featuring CG Tech's leadership story");
-    expect(d.body.startsWith('Hi Jason,\n')).toBe(true);
-    expect(d.body).toContain('your work as CEO at CG Tech stood out');
-    expect(d.body).toContain('Okba Chabbi, Massey Whiteknife and Anja Vandenbergh');
+  it('greets by first name and puts the congratulations line, role and edition in place', () => {
+    const d = draftEmail({ name: 'Jason English', title: 'CEO', company: 'CG Tech', opener: "Congratulations on CG Tech's Series B!", edition: 'Top Fintech Players to Look Out For in 2026' });
+    expect(d.subject).toBe('Cover Story invite for CG Tech');
+    expect(d.body.startsWith("Dear Jason,\n\nCongratulations on CG Tech's Series B!\n\nYour recent achievement in your role as CEO at CG Tech reflects")).toBe(true);
+    expect(d.body).toContain('special edition, "Top Fintech Players to Look Out For in 2026".');
+    expect(d.body).toContain('At Humans of Globe, we take pride');
   });
 
-  it('puts the personal opener first and keeps the fixed pitch after it', () => {
-    const d = draftEmail({ name: 'Ziad El Chaar', title: 'CEO', company: 'DarGlobal', opener: 'Your London launch with DarGlobal this year caught our eye.' });
-    expect(d.body.startsWith('Hi Ziad,\n\nYour London launch with DarGlobal this year caught our eye.\n\nThat\'s why I\'m reaching out from Humans of Globe.')).toBe(true);
-    expect(d.body).not.toContain('stood out');
-    expect(d.body).toContain('Would you be open to sharing yours');
-  });
-
-  it('still reads well with no title or company', () => {
-    const d = draftEmail({ name: 'Mena Botros', title: '', company: '' });
-    expect(d.subject).toBe('An invitation to share your leadership story');
-    expect(d.body).toContain('your work stood out');
+  it('still reads well with no name, title or company', () => {
+    const d = draftEmail({ name: '', title: '', company: '' });
+    expect(d.subject).toBe('Cover Story invite');
+    expect(d.body.startsWith('Dear Sir or Madam,\n\nCongratulations on your continued leadership!')).toBe(true);
+    expect(d.body).toContain('Your recent achievement in your work reflects');
   });
 
   it('skips honorifics and handles a missing name', () => {
     expect(firstNameOf('Dr. Ahmed Al Sayed')).toBe('Ahmed');
     expect(firstNameOf('H.E. Khalid Al Malik')).toBe('Khalid');
-    expect(firstNameOf('')).toBe('there');
+    expect(firstNameOf('')).toBe('');
   });
 });
 

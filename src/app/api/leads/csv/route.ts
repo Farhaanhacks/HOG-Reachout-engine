@@ -2,14 +2,14 @@ import { NextResponse } from 'next/server';
 import { checkPassword } from '../../../../lib/auth';
 import { toCsv } from '../../../../lib/csv';
 import { getDb } from '../../../../lib/db';
-import { brandLabel } from '../../../../lib/brands';
+import { brandLabel, isBrand } from '../../../../lib/brands';
 import { marketShort } from '../../../../lib/markets';
 import { filtersFrom } from '../../../../lib/lead-filters';
 import { draftEmail, unsubscribeLine } from '../../../../lib/pitch';
 import { unsubscribeUrl } from '../../../../lib/unsubscribe';
 import { getSettings } from '../../../../lib/settings';
 import { listPeople } from '../../../../lib/store';
-import { editionFor } from '../../../../lib/targeting';
+import { editionFor, editionTitle } from '../../../../lib/targeting';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,11 +29,12 @@ export async function GET(req: Request) {
       ],
       people.map((p) => {
         const e = editionFor(p.industry, editions);
-        const d = draftEmail({ ...p, edition: e.edition, industryLine: e.industryLine });
+        const edition = p.edition_name || editionTitle(e);
+        const d = draftEmail({ ...p, edition, brand: isBrand(p.brand) ? p.brand : 'hog' });
         return [
           brandLabel(p.brand), p.name, d.firstName, p.title, p.company, p.company_website ?? '', p.linkedin_url ?? '', p.email, p.email_status, p.company_employees ?? '',
           p.firm_size || p.company_size, p.industry ?? '', p.country || p.location, marketShort(p.geo), p.target_title ?? '',
-          p.icp_fit === false ? 'no' : p.icp_fit ? 'yes' : '', p.segment ?? '', e.edition, p.suppressed_reason ?? '', p.sent_from_email ?? '', p.opener ?? '',
+          p.icp_fit === false ? 'no' : p.icp_fit ? 'yes' : '', p.segment ?? '', edition, p.suppressed_reason ?? '', p.sent_from_email ?? '', p.opener ?? '',
           d.subject, `${d.body}\n\n${unsubscribeLine(unsubscribeStyle, unsubscribeUrl(p.id))}`, unsubscribeUrl(p.id), p.unsubscribed_at ? 'yes' : '', p.first_seen,
         ];
       }),

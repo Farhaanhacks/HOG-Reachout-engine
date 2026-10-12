@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { companyKey, emailDomain, entriesFor, linkedinKey, normDomain } from '../src/lib/suppression';
-import { DEFAULT_RULES, checkLead, cleanRules, editionFor, firmSize, matchTitle, sectorOf } from '../src/lib/targeting';
+import { DEFAULT_RULES, checkLead, cleanRules, editionFor, editionTitle, firmSize, matchTitle, sectorOf } from '../src/lib/targeting';
 import { brandOfEmail, eligibleBrands } from '../src/lib/brands';
 import { glForCountry, marketOf } from '../src/lib/markets';
 
@@ -73,8 +73,9 @@ describe('cleanRules and editions', () => {
   });
 
   it('gives every industry an edition, falling back to the general one', () => {
-    expect(editionFor('computer & network security')).toMatchObject({ edition: 'Cybersecurity Leaders Edition', industryLine: 'Cybersecurity Leaders' });
-    expect(editionFor('farming')).toMatchObject({ edition: 'Global Leaders Edition', industryLine: 'Business Leaders' });
+    expect(editionFor('computer & network security')).toMatchObject({ edition: 'Top Cybersecurity Leaders to Watch in {year}', industryLine: 'Cybersecurity Leaders' });
+    expect(editionFor('farming')).toMatchObject({ edition: 'Top Business Leaders to Watch in {year}', industryLine: 'Business Leaders' });
+    expect(editionTitle(editionFor('banking'), new Date('2026-10-12'))).toBe('Top Fintech and Finance Players to Look Out For in 2026');
   });
 });
 

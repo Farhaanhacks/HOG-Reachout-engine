@@ -3,12 +3,12 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { CountryBadge, EmailBadge, FitBadge, PersonName, SizeBadge, SuppressedBadge } from '../../components/badges';
 import { api, formatDate, post } from '../../lib/client';
-import { BRANDS, BRAND_LIST, brandLabel } from '../../lib/brands';
+import { BRANDS, BRAND_LIST, brandLabel, isBrand } from '../../lib/brands';
 import { MARKETS, MARKET_LIST } from '../../lib/markets';
 import { draftEmail } from '../../lib/pitch';
 import type { Settings } from '../../lib/settings';
 import type { SavedPerson } from '../../lib/store';
-import { editionFor, type Edition } from '../../lib/targeting';
+import { editionFor, editionTitle, type Edition } from '../../lib/targeting';
 
 /** The website as a link without the https:// in front. */
 function Website({ url }: { url?: string }) {
@@ -126,7 +126,7 @@ export default function LeadsPage() {
               {people?.map((p) => {
                 const open = openDraft === String(p.id);
                 const e = open ? editionFor(p.industry, editions) : null;
-                const d = e ? draftEmail({ ...p, edition: e.edition, industryLine: e.industryLine }) : null;
+                const d = e ? draftEmail({ ...p, edition: p.edition_name || editionTitle(e), brand: isBrand(p.brand) ? p.brand : 'hog' }) : null;
                 return (
                   <Fragment key={String(p.id)}>
                     <tr>

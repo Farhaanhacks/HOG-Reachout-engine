@@ -2,7 +2,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { parseJsonObject } from '../src/lib/ai';
 import type { Person } from '../src/lib/linkedin';
-import { cleanOpener, factsFor, fallbackOpener, personalizeNext, personalizeOne, redactName, setOpener } from '../src/lib/personalize';
+import { cleanAchievement, cleanEdition, factsFor, fallbackOpener, personalizeNext, personalizeOne, redactName, setOpener, systemPrompt } from '../src/lib/personalize';
 import type { Services } from '../src/lib/services';
 import { savePeople, type Db } from '../src/lib/store';
 
@@ -16,7 +16,7 @@ beforeEach(async () => {
   db = { query: async (text, params = []) => (await pg.query(text, params as unknown[])).rows as never };
 });
 
-/** Fake Serper news and DeepSeek. `openers` maps a company name to the reply DeepSeek gives; 'fail' makes DeepSeek error. */
+/** Fake Serper news and DeepSeek. `openers` maps a company name to the achievement DeepSeek gives; 'fail' makes DeepSeek error. */
 function fakes(openers: Record<string, string | 'fail'>) {
   const ai: { system: string; user: string }[] = [];
   const news: string[] = [];
@@ -31,7 +31,7 @@ function fakes(openers: Record<string, string | 'fail'>) {
     const company = /Company: (.+)/.exec(user)?.[1] ?? '';
     const reply = openers[company];
     if (reply === 'fail') return new Response(JSON.stringify({ error: { message: 'Service unavailable' } }), { status: 503 });
-    return new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ opener: reply ?? '', fact_used: 'Riyadh office' }) } }] }), { status: 200 });
+    return new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ achievement: reply ?? '', edition: reply ? 'Top Fintech Players to Look Out For in 2026' : '', fact_used: 'Riyadh office' }) } }] }), { status: 200 });
   }) as unknown as typeof fetch;
   const svc: Services = { fetch: f, keys: { serper: 's', jina: '', deepseek: 'd' } };
   return { svc, ai, news };
@@ -54,7 +54,7 @@ async function seed(people: Person[]) {
   await db.query("UPDATE people SET email = lower(replace(name, ' ', '')) || '@example.com', apollo_status = 'matched', email_status = 'verified', company_size = 'fit', apollo_checked_at = now()");
 }
 const row = async (company: string) =>
-  (await db.query<{ opener: string; opener_status: string; opener_fact: string }>('SELECT opener, opener_status, opener_fact FROM people WHERE company = $1', [company]))[0];
+  (await db.query<{ opener: string; opener_status: string; opener_fact: string; edition_name: string }>('SELECT opener, opener_status, opener_fact, edition_name FROM people WHERE company = $1', [company]))[0];
 
 describe('privacy', () => {
   it('replaces the name in any form', () => {
@@ -76,23 +76,32 @@ describe('privacy', () => {
 describe('personalizeNext', () => {
   it('saves a usable opener, writes one from role and company when nothing specific is found, and retries failures later', async () => {
     await seed([person('A One', 'Alpha'), person('B Two', 'Beta'), person('C Three', 'Gamma')]);
-    const { svc, news } = fakes({ Alpha: 'Your Riyadh office opening this year caught our eye.', Beta: '', Gamma: 'fail' });
+    const { svc, news } = fakes({ Alpha: "Alpha's new Riyadh office", Beta: '', Gamma: 'fail' });
     const summary = await personalizeNext(svc, db, 10);
     expect(summary).toMatchObject({ done: 2, none: 0, failed: 1, searches: 6 }); // two news searches each: the person at the company, then the company
     expect(news).toEqual(expect.arrayContaining(['"Alpha"', '"Beta"', '"Gamma"']));
-    expect(await row('Alpha')).toMatchObject({ opener: 'Your Riyadh office opening this year caught our eye.', opener_status: 'done', opener_fact: 'Riyadh office' });
-    expect(await row('Beta')).toMatchObject({ opener: 'Leading Beta as CEO puts you among the leaders our readers want to hear from.', opener_status: 'done', opener_fact: 'role and company (no news found)' });
+    expect(await row('Alpha')).toMatchObject({
+      opener: "Congratulations on Alpha's new Riyadh office!",
+      opener_status: 'done',
+      opener_fact: 'Riyadh office',
+      edition_name: 'Top Fintech Players to Look Out For in 2026',
+    });
+    expect(await row('Beta')).toMatchObject({ opener: 'Congratulations on your continued leadership at Beta!', opener_status: 'done', opener_fact: 'role and company (no news found)', edition_name: '' });
     expect(await row('Gamma')).toMatchObject({ opener_status: '' }); // tried again next time
 
-    const again = await personalizeNext(fakes({ Gamma: 'Your growth at Gamma caught our eye.' }).svc, db, 10);
+    const again = await personalizeNext(fakes({ Gamma: "Gamma's Series B" }).svc, db, 10);
     expect(again).toMatchObject({ done: 1, none: 0 });
   });
 
-  it('rejects openers that break the rules', () => {
-    expect(cleanOpener('Amazing work at Acme!')).toBe('');
-    expect(cleanOpener('Have you seen this? https://x.com')).toBe('');
-    expect(cleanOpener('the person launched Acme')).toBe('');
-    expect(cleanOpener('Your Riyadh office opening this year caught our eye.')).toBe('Your Riyadh office opening this year caught our eye.');
+  it('keeps only plain, short achievements and edition names', () => {
+    expect(cleanAchievement('Amazing growth at Acme')).toBe('');
+    expect(cleanAchievement('Acme? https://x.com')).toBe('');
+    expect(cleanAchievement('the person launching Acme')).toBe('');
+    expect(cleanAchievement("Congratulations on Acme's expansion into Saudi Arabia!")).toBe("Acme's expansion into Saudi Arabia");
+    expect(cleanEdition('Top Fintech Players to Look Out For in 2026.')).toBe('Top Fintech Players to Look Out For in 2026');
+    expect(cleanEdition('Top Fintech Players')).toBe(''); // no year
+    expect(cleanEdition('"Top" Leaders in 2026')).toBe('');
+    expect(systemPrompt(2026)).toContain('in 2026');
   });
 
   it('needs a DeepSeek key', async () => {
@@ -104,8 +113,8 @@ describe('personalizeNext', () => {
   it('lets the team write or clear an opener by hand', async () => {
     await seed([person('A One', 'Alpha')]);
     const [p] = await db.query<{ id: number }>('SELECT id FROM people');
-    await setOpener(db, p.id, '  Your new Abu Dhabi office caught our eye.  ');
-    expect(await row('Alpha')).toMatchObject({ opener: 'Your new Abu Dhabi office caught our eye.', opener_status: 'done', opener_fact: 'edited by the team' });
+    await setOpener(db, p.id, '  Congratulations on your new Abu Dhabi office!  ');
+    expect(await row('Alpha')).toMatchObject({ opener: 'Congratulations on your new Abu Dhabi office!', opener_status: 'done', opener_fact: 'edited by the team' });
     await setOpener(db, p.id, '');
     expect(await row('Alpha')).toMatchObject({ opener: '', opener_status: 'none' });
   });
@@ -128,8 +137,8 @@ describe('personalizeOne', () => {
   it('personalizes one lead on demand, even without an email, and can redo it', async () => {
     await savePeople(db, [person('Mihai Ionescu', 'Oves Enterprise')], 'ae', 'q');
     const [p] = await db.query<{ id: number }>('SELECT id FROM people');
-    const { svc, news } = fakes({ 'Oves Enterprise': 'Your SkyLock drone interception system launched this year caught our eye.' });
-    expect(await personalizeOne(svc, db, p.id)).toEqual({ status: 'done', opener: 'Your SkyLock drone interception system launched this year caught our eye.', fact: 'Riyadh office' });
+    const { svc, news } = fakes({ 'Oves Enterprise': 'the launch of the SkyLock drone interception system' });
+    expect(await personalizeOne(svc, db, p.id)).toEqual({ status: 'done', opener: 'Congratulations on the launch of the SkyLock drone interception system!', fact: 'Riyadh office' });
     expect(news).toEqual(['"Mihai Ionescu" "Oves Enterprise"', '"Oves Enterprise"']);
     expect(await row('Oves Enterprise')).toMatchObject({ opener_status: 'done' });
   });
@@ -140,16 +149,15 @@ describe('personalizeOne', () => {
 });
 
 describe('fallbackOpener', () => {
-  it('uses only role and company', () => {
-    expect(fallbackOpener({ title: 'Founder & CEO', company: 'Oves Enterprise' })).toBe('Leading Oves Enterprise as Founder & CEO puts you among the leaders our readers want to hear from.');
-    expect(fallbackOpener({ title: '', company: 'Oves Enterprise' })).toBe('Your work at Oves Enterprise puts you among the leaders our readers want to hear from.');
-    expect(fallbackOpener({ title: '', company: '' })).toBe('Your leadership journey is the kind of story our readers want to hear.');
+  it('uses only the company', () => {
+    expect(fallbackOpener({ title: 'Founder & CEO', company: 'Oves Enterprise' })).toBe('Congratulations on your continued leadership at Oves Enterprise!');
+    expect(fallbackOpener({ title: '', company: '' })).toBe('Congratulations on your continued leadership!');
   });
 
   it('re-personalizes leads that were held back under the old rule', async () => {
     await seed([person('A One', 'Alpha')]);
     await db.query("UPDATE people SET opener_status = 'none'");
-    const { svc } = fakes({ Alpha: 'Your Riyadh office opening this year caught our eye.' });
+    const { svc } = fakes({ Alpha: "Alpha's new Riyadh office" });
     expect(await personalizeNext(svc, db, 10)).toMatchObject({ done: 1 });
     expect(await row('Alpha')).toMatchObject({ opener_status: 'done' });
   });

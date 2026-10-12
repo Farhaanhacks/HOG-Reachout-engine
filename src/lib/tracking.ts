@@ -1,3 +1,4 @@
+import { FEE_LINE } from './pitch';
 import { getJson, type Services } from './services';
 import { getSetting, setSetting } from './settings';
 import { ensureSchema, type Db } from './store';
@@ -34,7 +35,14 @@ type ApolloMessage = {
   replied?: boolean | null;
   reply_class?: string | null;
   not_sent_reason?: string | null;
+  body_text?: string | null;
 };
+
+/** Whether a sent email showed the featuring fee (A/B test), from its text; null when Apollo did not return the text. */
+export function priceShown(bodyText: string | null | undefined): boolean | null {
+  if (!bodyText) return null;
+  return bodyText.replace(/\s+/g, ' ').toLowerCase().includes(FEE_LINE.toLowerCase().split(':')[0]);
+}
 
 const day = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -57,13 +65,14 @@ async function saveMessages(db: Db, list: ApolloMessage[], mark: { opened?: bool
     if (!m.id) continue;
     await db.query(
       `INSERT INTO messages (id, contact_id, sequence_id, email_account_id, from_email, to_email, status, step, completed_at, happened_at, bounced, spam_blocked,
-         replied, reply_class, opened, not_sent_reason, unsubscribed, synced_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, now())
+         replied, reply_class, opened, not_sent_reason, unsubscribed, price_shown, synced_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, now())
        ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, completed_at = COALESCE(EXCLUDED.completed_at, messages.completed_at),
          happened_at = COALESCE(EXCLUDED.happened_at, messages.happened_at), bounced = messages.bounced OR EXCLUDED.bounced,
          spam_blocked = messages.spam_blocked OR EXCLUDED.spam_blocked, replied = messages.replied OR EXCLUDED.replied,
          reply_class = COALESCE(NULLIF(EXCLUDED.reply_class, ''), messages.reply_class), opened = messages.opened OR EXCLUDED.opened,
-         not_sent_reason = EXCLUDED.not_sent_reason, unsubscribed = messages.unsubscribed OR EXCLUDED.unsubscribed, synced_at = now()`,
+         not_sent_reason = EXCLUDED.not_sent_reason, unsubscribed = messages.unsubscribed OR EXCLUDED.unsubscribed,
+         price_shown = COALESCE(EXCLUDED.price_shown, messages.price_shown), synced_at = now()`,
       [
         m.id,
         m.contact_id ?? '',
@@ -82,6 +91,7 @@ async function saveMessages(db: Db, list: ApolloMessage[], mark: { opened?: bool
         !!mark.opened,
         m.not_sent_reason ?? '',
         !!mark.unsubscribed,
+        priceShown(m.body_text),
       ],
     );
   }
@@ -199,6 +209,7 @@ const METRICS_SQL = `count(DISTINCT p.id) FILTER (WHERE m.completed_at IS NOT NU
 export const GROUPS = {
   segment: { label: 'Segment', sql: "COALESCE(NULLIF(p.segment, ''), 'Earlier leads')" },
   size: { label: 'Company size', sql: "CASE p.firm_size WHEN 'small' THEN 'Small (up to 50)' WHEN 'large' THEN 'Large (51+)' ELSE 'Unknown' END" },
+  price: { label: 'Price shown (A/B test)', sql: "CASE WHEN m.price_shown THEN 'A: fee shown' WHEN m.price_shown = FALSE THEN 'B: no fee' ELSE 'Unknown' END" },
   brand: { label: 'Brand', sql: "CASE p.brand WHEN 'hog' THEN 'Humans of Globe' WHEN 'gulficons' THEN 'Gulf Icons' WHEN 'ciominds' THEN 'CIO Minds' ELSE 'None' END" },
   market: { label: 'Market', sql: "CASE p.geo WHEN 'af' THEN 'Africa' WHEN 'eu' THEN 'Europe' WHEN 'us' THEN 'US' WHEN 'gcc' THEN 'GCC' WHEN 'me' THEN 'Middle East' WHEN 'ae' THEN 'UAE' WHEN 'uk' THEN 'UK' WHEN 'ca' THEN 'Canada' ELSE p.geo END" },
   country: { label: 'Country', sql: "COALESCE(NULLIF(p.country, ''), 'Unknown')" },

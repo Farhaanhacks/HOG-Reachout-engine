@@ -76,7 +76,12 @@ export async function ensureSchema(db: Db): Promise<void> {
     ADD COLUMN IF NOT EXISTS company_key TEXT,
     ADD COLUMN IF NOT EXISTS linkedin_key TEXT,
     ADD COLUMN IF NOT EXISTS sent_from TEXT NOT NULL DEFAULT '',
-    ADD COLUMN IF NOT EXISTS sent_from_email TEXT NOT NULL DEFAULT ''`);
+    ADD COLUMN IF NOT EXISTS sent_from_email TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS edition_name TEXT NOT NULL DEFAULT ''`);
+  // Openers written for the earlier email ("Your work as…") are rewritten in the Cover Story style ("Congratulations
+  // on…!") for everyone not sent yet; openers the team wrote by hand are kept.
+  await db.query(`UPDATE people SET opener_status = '' WHERE sequence_status = '' AND opener_status = 'done'
+    AND opener NOT LIKE 'Congratulations%' AND opener_fact <> 'edited by the team'`);
   // The brand each lead belongs to (see brands.ts) and the overlap it was split in. Leads saved before brands existed
   // were all found for Humans of Globe.
   await db.query(`ALTER TABLE people
@@ -138,6 +143,8 @@ export async function ensureSchema(db: Db): Promise<void> {
     synced_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`);
   await db.query('ALTER TABLE messages ADD COLUMN IF NOT EXISTS unsubscribed BOOLEAN NOT NULL DEFAULT FALSE');
+  // A/B test: whether the sent email showed the featuring fee (null when Apollo did not return its text).
+  await db.query('ALTER TABLE messages ADD COLUMN IF NOT EXISTS price_shown BOOLEAN');
   await db.query('CREATE INDEX IF NOT EXISTS messages_contact ON messages (contact_id)');
   await db.query('CREATE INDEX IF NOT EXISTS messages_account ON messages (email_account_id, happened_at)');
   await db.query(`CREATE TABLE IF NOT EXISTS outreach_log (
@@ -283,6 +290,8 @@ export type SavedPerson = {
   firm_size?: string;
   /** The brand they belong to: hog, gulficons or ciominds. Only that brand ever contacts them. */
   brand?: string;
+  /** The special edition they are shortlisted for, from the news research ("Top Fintech Players to Look Out For in 2026"). */
+  edition_name?: string;
   /** The edition segment they are pitched for ("Healthcare", "Technology"…). */
   segment?: string;
   /** The rule title they hold ("Managing Director"). */
@@ -312,7 +321,7 @@ export type SavedPerson = {
 /** The columns every list of people reads. */
 export const PERSON_COLUMNS = `id, linkedin_url, name, title, company, location, geo, geo_match, labels, is_target, inferred, status, seen_count, first_seen, last_seen,
   email, email_status, apollo_status, apollo_confidence, apollo_tier, rank, company_employees, company_size, company_website, company_domain, industry,
-  country, brand, sector, firm_size, segment, target_title, icp_fit, icp_note, suppressed_reason, sequence_status, sequence_note, sequenced_at, sent_from,
+  country, brand, sector, firm_size, segment, edition_name, target_title, icp_fit, icp_note, suppressed_reason, sequence_status, sequence_note, sequenced_at, sent_from,
   sent_from_email, opener, opener_fact, opener_status, unsubscribed_at`;
 
 /** Not on the suppression list (clients and people contacted before), checked live (see suppression.ts). */

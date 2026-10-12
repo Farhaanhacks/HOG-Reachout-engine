@@ -159,28 +159,33 @@ export function cleanRules(input: unknown): TitleRules {
 }
 
 /**
- * The edition a lead is pitched for, by industry: the edition title and the industry line in the email ("Cybersecurity
- * Leaders") change per segment, so they go into each contact's own fields instead of being written into the template.
+ * The edition a lead is pitched for, by industry, used when the news research did not name one for their company
+ * ("Top Fintech and Finance Players to Look Out For in 2026"). "{year}" in a title is the current year.
  */
 export type Edition = { segment: string; keywords: string[]; edition: string; industryLine: string };
 
 export const DEFAULT_EDITIONS: Edition[] = [
-  { segment: 'Hospitality', keywords: ['hospitality', 'hotel', 'restaurant', 'leisure, travel', 'tourism', 'resort'], edition: 'Hospitality Leaders Edition', industryLine: 'Hospitality Leaders' },
-  { segment: 'Healthcare', keywords: ['hospital', 'health care', 'healthcare', 'medical', 'pharmaceutical', 'biotechnology', 'mental health', 'clinic', 'dental'], edition: 'Healthcare Leaders Edition', industryLine: 'Healthcare Leaders' },
-  { segment: 'Cybersecurity', keywords: ['computer & network security', 'cyber', 'security'], edition: 'Cybersecurity Leaders Edition', industryLine: 'Cybersecurity Leaders' },
-  { segment: 'Technology', keywords: ['software', 'information technology', 'internet', 'computer', 'telecommunications', 'artificial intelligence'], edition: 'Technology Leaders Edition', industryLine: 'Technology Leaders' },
-  { segment: 'Finance', keywords: ['financial', 'banking', 'investment', 'insurance', 'capital markets', 'venture capital', 'accounting'], edition: 'Finance Leaders Edition', industryLine: 'Finance Leaders' },
-  { segment: 'Real estate', keywords: ['real estate', 'construction', 'architecture', 'building materials'], edition: 'Real Estate Leaders Edition', industryLine: 'Real Estate Leaders' },
-  { segment: 'Energy', keywords: ['oil & energy', 'renewables', 'energy', 'utilities', 'mining'], edition: 'Energy Leaders Edition', industryLine: 'Energy Leaders' },
-  { segment: 'Education', keywords: ['education', 'e-learning', 'higher education'], edition: 'Education Leaders Edition', industryLine: 'Education Leaders' },
-  { segment: 'Media and marketing', keywords: ['marketing', 'advertising', 'media', 'public relations', 'entertainment'], edition: 'Media & Marketing Leaders Edition', industryLine: 'Media & Marketing Leaders' },
-  { segment: 'Retail and consumer', keywords: ['retail', 'consumer', 'apparel', 'fashion', 'cosmetics', 'food & beverages'], edition: 'Consumer Brands Leaders Edition', industryLine: 'Consumer Brand Leaders' },
-  { segment: 'Logistics', keywords: ['logistics', 'transportation', 'maritime', 'airlines', 'automotive'], edition: 'Logistics & Mobility Leaders Edition', industryLine: 'Logistics & Mobility Leaders' },
-  { segment: 'Professional services', keywords: ['management consulting', 'legal', 'law practice', 'staffing', 'human resources'], edition: 'Professional Services Leaders Edition', industryLine: 'Professional Services Leaders' },
+  { segment: 'Hospitality', keywords: ['hospitality', 'hotel', 'restaurant', 'leisure, travel', 'tourism', 'resort'], edition: 'Top Hospitality Leaders to Watch in {year}', industryLine: 'Hospitality Leaders' },
+  { segment: 'Healthcare', keywords: ['hospital', 'health care', 'healthcare', 'medical', 'pharmaceutical', 'biotechnology', 'mental health', 'clinic', 'dental'], edition: 'Top Healthcare Leaders to Watch in {year}', industryLine: 'Healthcare Leaders' },
+  { segment: 'Cybersecurity', keywords: ['computer & network security', 'cyber', 'security'], edition: 'Top Cybersecurity Leaders to Watch in {year}', industryLine: 'Cybersecurity Leaders' },
+  { segment: 'Technology', keywords: ['software', 'information technology', 'internet', 'computer', 'telecommunications', 'artificial intelligence'], edition: 'Top Technology Innovators to Watch in {year}', industryLine: 'Technology Leaders' },
+  { segment: 'Finance', keywords: ['financial', 'banking', 'investment', 'insurance', 'capital markets', 'venture capital', 'accounting'], edition: 'Top Fintech and Finance Players to Look Out For in {year}', industryLine: 'Finance Leaders' },
+  { segment: 'Real estate', keywords: ['real estate', 'construction', 'architecture', 'building materials'], edition: 'Top Real Estate Leaders to Watch in {year}', industryLine: 'Real Estate Leaders' },
+  { segment: 'Energy', keywords: ['oil & energy', 'renewables', 'energy', 'utilities', 'mining'], edition: 'Top Energy Leaders to Watch in {year}', industryLine: 'Energy Leaders' },
+  { segment: 'Education', keywords: ['education', 'e-learning', 'higher education'], edition: 'Top Education Leaders to Watch in {year}', industryLine: 'Education Leaders' },
+  { segment: 'Media and marketing', keywords: ['marketing', 'advertising', 'media', 'public relations', 'entertainment'], edition: 'Top Media and Marketing Leaders to Watch in {year}', industryLine: 'Media & Marketing Leaders' },
+  { segment: 'Retail and consumer', keywords: ['retail', 'consumer', 'apparel', 'fashion', 'cosmetics', 'food & beverages'], edition: 'Top Consumer Brand Leaders to Watch in {year}', industryLine: 'Consumer Brand Leaders' },
+  { segment: 'Logistics', keywords: ['logistics', 'transportation', 'maritime', 'airlines', 'automotive'], edition: 'Top Logistics and Mobility Leaders to Watch in {year}', industryLine: 'Logistics & Mobility Leaders' },
+  { segment: 'Professional services', keywords: ['management consulting', 'legal', 'law practice', 'staffing', 'human resources'], edition: 'Top Professional Services Leaders to Watch in {year}', industryLine: 'Professional Services Leaders' },
 ];
 
 /** Used when no segment's keywords match the lead's industry. */
-export const FALLBACK_EDITION: Edition = { segment: 'Business', keywords: [], edition: 'Global Leaders Edition', industryLine: 'Business Leaders' };
+export const FALLBACK_EDITION: Edition = { segment: 'Business', keywords: [], edition: 'Top Business Leaders to Watch in {year}', industryLine: 'Business Leaders' };
+
+/** An edition title with "{year}" filled in: "Top Healthcare Leaders to Watch in 2026". */
+export function editionTitle(edition: Edition, now: Date = new Date()): string {
+  return edition.edition.replace(/\{year\}/g, String(now.getFullYear()));
+}
 
 /** The first segment whose keywords appear in the lead's industry, in table order. */
 export function editionFor(industry: string | null | undefined, editions: Edition[] = DEFAULT_EDITIONS): Edition {

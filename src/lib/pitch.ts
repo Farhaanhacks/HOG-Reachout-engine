@@ -1,42 +1,50 @@
+import { BRANDS, type Brand } from './brands';
+
 /**
- * The Humans of Globe pitch, from the team's sales-agent setup: an invitation to share a leadership story in an upcoming
- * global feature (print and digital), for the authentic, high-editorial-standard storytelling, the visibility among
- * decision-makers, and the peers it connects them with.
+ * The Cover Story invitation, the same for every brand (Humans of Globe, Gulf Icons, CIO Minds) with the brand's own name
+ * and website: congratulations on a recent achievement, a shortlisting for the Cover Story Profile in a special edition
+ * named for the person's field, what the profile includes, and a reply-to-hear-more close.
+ *
+ * A/B test: version A shows the featuring fee, version B does not, to see whether showing the price affects spam
+ * placement and replies. Both versions are pasted into the same Apollo step as Test A and Test B; Apollo splits the
+ * people between them, and the Results page tells them apart by whether the sent email contains the fee line.
  */
-export const PITCH = {
-  offer: 'Humans of Globe Media Features',
-  callToAction: 'Share their leadership story for an upcoming global feature',
-  socialProof: ['Okba Chabbi', 'Massey Whiteknife', 'Anja Vandenbergh'],
-  /** The price of putting the person on the cover of the edition. */
-  coverPrice: 'USD 2,500',
+
+/** The same for every sender. Each sender's own name comes from Apollo (the sending inbox's user). */
+export const SENDER = {
+  designation: 'Business Development Manager',
+  office: '+1 (253) 338-0280',
+  whatsapp: '+1 253-338-0280',
 };
+
+/** Apollo's variables for the sending user's name (insert them from the editor's variable picker, Sender tab). */
+export const SENDER_NAME_VARIABLES = '{{sender_first_name}} {{sender_last_name}}';
+
+export const FEE_LINE = 'Proposed Featuring Fee: USD 2500';
+export type Variant = 'A' | 'B';
+export const VARIANT_LABEL: Record<Variant, string> = { A: 'Version A (shows the fee)', B: 'Version B (no fee)' };
 
 /**
  * How the email lets people opt out:
- *  - link: the engine's own signed unsubscribe link (works with any mailbox).
- *  - apollo: Apollo adds "No longer interested in these messages? Unsubscribe" after the signature, with "Unsubscribe" a
- *    clickable word that opts the person out in one click ("Append a sequences opt-out message" on in Apollo's email
- *    settings), so the template itself has no unsubscribe line. With one-click unsubscribe headers on, Gmail and Yahoo
- *    also show an Unsubscribe button next to the sender's name. Opt-outs are copied back from Apollo.
- *  - reply: no link at all; the person replies "unsubscribe". Apollo stops the sequence on any reply, and replies Apollo
- *    classes as unsubscribe or not interested are never contacted again.
  *  - button: an HTML email ending in a real Unsubscribe button that opens the person's own signed unsubscribe page.
- *    Pasted into Apollo's raw HTML editor; Apollo's own opt-out line is turned off so there is only one.
+ *  - link: the engine's own signed unsubscribe link, written out.
+ *  - apollo: Apollo adds "No longer interested in these messages? Unsubscribe" after the signature.
+ *  - reply: no link at all; the person replies "unsubscribe".
  */
 export type UnsubscribeStyle = 'button' | 'link' | 'apollo' | 'reply';
 export const UNSUBSCRIBE_STYLES: UnsubscribeStyle[] = ['button', 'link', 'apollo', 'reply'];
 
 /**
- * The Apollo custom contact fields that carry each person's own email parts into the sequence. The team creates these
- * fields once in Apollo (Settings, Objects and fields, Contact), with exactly these names. The edition title and the
- * industry line change per segment, so they are fields too, never written into the template.
+ * The Apollo custom contact fields that carry each person's own parts into the sequence. The team creates these fields
+ * once in Apollo (Settings, Objects and fields, Contact: global, single-line text), with exactly these names.
  */
 export const CUSTOM_FIELDS = {
   subject: 'HOG Subject',
   opener: 'HOG Opener',
-  unsubscribe: 'HOG Unsubscribe link',
+  role: 'HOG Role',
   edition: 'HOG Edition',
   industry: 'HOG Industry',
+  unsubscribe: 'HOG Unsubscribe link',
 } as const;
 
 /** How a custom field is written in an Apollo template: {{contact.HOG Opener}} (the form Apollo's variable picker inserts). */
@@ -44,140 +52,139 @@ export function fieldVariable(key: keyof typeof CUSTOM_FIELDS): string {
   return `{{contact.${CUSTOM_FIELDS[key]}}}`;
 }
 
-export type DraftInput = {
-  name: string;
-  title: string;
-  company: string;
-  /** The personal first line, when one was written. */
-  opener?: string;
-  /** The edition they are pitched for ("Healthcare Leaders Edition") and its industry line ("Healthcare Leaders"). */
-  edition?: string;
-  industryLine?: string;
-};
-export type Draft = { firstName: string; subject: string; body: string };
-
 const HONORIFIC = /^(dr|mr|mrs|ms|miss|eng|engr|prof|sir|he|h\.e|sheikh|shaikh)\.?$/i;
 
-const DEFAULT_EDITION = 'Global Leaders Edition';
-const DEFAULT_INDUSTRY_LINE = 'Business Leaders';
-
-/** The line after the opener, naming the edition and its industry line. */
-function afterOpener(edition: string, industryLine: string): string {
-  return `That's why I'm reaching out from Humans of Globe. We're putting together our upcoming ${edition}, a global feature on ${industryLine} who are building something worth talking about, and we'd love to include your story.`;
-}
-
-/** The fixed part of every email, after the personal opening. */
-const PITCH_PARAGRAPHS = [
-  'Humans of Globe publishes in-depth leadership stories in print and online, read by decision-makers and professionals around the world. Each feature is an interview told in your own voice and held to a high editorial standard, not a press release.',
-  `Leaders such as ${PITCH.socialProof.slice(0, -1).join(', ')} and ${PITCH.socialProof[PITCH.socialProof.length - 1]} have shared their stories with us.`,
-  `A cover feature, with your story on the cover of the edition, is ${PITCH.coverPrice}.`,
-  'Would you be open to sharing yours in the upcoming edition? Reply here and I will send over the details.',
-];
-
-/** The last line of every email, plain-text version, for the engine's own link. */
-export function unsubscribeLineText(url: string): string {
-  return `If you'd rather not hear from Humans of Globe, you can unsubscribe here: ${url}`;
-}
-
-/** What Apollo appends after the signature in the apollo style ("Unsubscribe" is the clickable word). */
-export const APOLLO_OPT_OUT = 'No longer interested in these messages? Unsubscribe';
-
-/** The last line of every email in the chosen style. `url` is the person's own unsubscribe link (link style only). */
-export function unsubscribeLine(style: UnsubscribeStyle, url: string): string {
-  if (style === 'apollo') return APOLLO_OPT_OUT;
-  if (style === 'button') return 'No longer want these emails?  [ Unsubscribe ]';
-  if (style === 'reply') return 'If you would rather not hear from us again, just reply "unsubscribe" and we will not contact you again.';
-  return unsubscribeLineText(url);
-}
-
-/** "Dr. Ahmed Al Sayed" gives "Ahmed"; an empty name gives "there" (for "Hi there"). */
+/** "Dr. Ahmed Al Sayed" gives "Ahmed"; an empty name gives "" (the greeting then says "Sir or Madam"). */
 export function firstNameOf(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
   while (words.length > 1 && HONORIFIC.test(words[0])) words.shift();
   const first = words[0] ?? '';
-  return first ? first.charAt(0).toUpperCase() + first.slice(1) : 'there';
+  return first ? first.charAt(0).toUpperCase() + first.slice(1) : '';
 }
 
 export function subjectFor(company: string): string {
-  if (!company) return 'An invitation to share your leadership story';
-  // "DAMAC Properties" takes "DAMAC Properties'", not "DAMAC Properties's".
-  return `Featuring ${company}${/s$/i.test(company.trim()) ? "'" : "'s"} leadership story`;
+  return company.trim() ? `Cover Story invite for ${company.trim()}` : 'Cover Story invite';
 }
 
-/** "as Founder & CEO at Acme", "at Acme", or nothing, depending on what we know. */
-function roleLine(title: string, company: string): string {
-  if (title && company) return ` as ${title} at ${company}`;
-  if (company) return ` at ${company}`;
-  return '';
+/** "your role as Founder & CEO at Access Dubai", for "Your recent achievement in …". */
+export function roleFor(title: string, company: string): string {
+  const t = title.trim();
+  const c = company.trim();
+  if (t && c) return `your role as ${t} at ${c}`;
+  if (c) return `your work at ${c}`;
+  if (t) return `your role as ${t}`;
+  return 'your work';
 }
 
-/**
- * The first email for a lead, as they will read it. The personal opener (written from research, see personalize.ts)
- * comes first; everything else is the fixed pitch, assembled in code, so the AI can never change what Humans of Globe
- * offers. The sending mailbox adds the signature. Without an opener (only before personalization has run) the
- * standard opening is shown.
- */
-export function draftEmail(p: DraftInput): Draft {
-  const firstName = firstNameOf(p.name);
-  const opener = p.opener?.trim();
-  const edition = p.edition?.trim() || DEFAULT_EDITION;
-  const industryLine = p.industryLine?.trim() || DEFAULT_INDUSTRY_LINE;
-  const body = [
-    `Hi ${firstName},`,
-    '',
-    opener
-      ? `${opener}\n\n${afterOpener(edition, industryLine)}`
-      : `I'm reaching out from Humans of Globe. We're putting together our upcoming ${edition}, a global feature on ${industryLine} who are building something worth talking about, and your work${roleLine(p.title, p.company)} stood out.`,
-    '',
-    PITCH_PARAGRAPHS.join('\n\n'),
-  ].join('\n');
-  return { firstName, subject: subjectFor(p.company), body };
+/** The parts that change per person, as they go into the custom fields (or into a preview). */
+export type EmailParts = { firstName: string; opener: string; role: string; edition: string };
+type Bold = { bold: true; text: string };
+type Block = string | Bold | { list: string[] } | { lines: string[] };
+
+const INCLUDES = (brand: Brand) => [
+  'A ten-page professionally written editorial feature highlighting your leadership journey, business vision, and organizational achievements',
+  'Your portrait featured as the cover face of the edition',
+  'Global digital circulation of the magazine',
+  'Print-ready PDF with reprint and promotional rights',
+  'Five complimentary printed copies',
+  'Official edition logos and a Digital Certificate of Honor',
+  'Backlink to your official website',
+  'Six press releases distributed throughout the year',
+  'One complimentary thought-leadership article in a future edition',
+  'Back cover advertisement',
+  `Banner and sidebar advertisements on the ${BRANDS[brand].label} website`,
+  'Promotional campaigns across LinkedIn, Facebook, and Instagram',
+];
+
+/** The email as blocks, so the plain-text and HTML versions always say exactly the same thing. */
+function blocks(brand: Brand, variant: Variant, p: EmailParts, senderName: string, greetingName: string): Block[] {
+  const name = BRANDS[brand].label;
+  return [
+    `Dear ${greetingName},`,
+    { bold: true, text: p.opener },
+    `Your recent achievement in ${p.role} reflects your leadership and the impact you are creating in your field. At ${name}, we take pride in recognizing individuals who are shaping their industries, and your journey caught the attention of our editorial team.`,
+    `We are pleased to share that you have been shortlisted for a Cover Story Profile in our upcoming special edition, "${p.edition}".`,
+    'This edition will spotlight influential leaders who are driving innovation, shaping industry trends, and creating meaningful business impact. We would be honoured to feature your leadership journey, professional milestones, and vision for the future for our global audience of C-suite executives, investors, and industry decision-makers.',
+    { bold: true, text: 'The Cover Story Profile may include:' },
+    { list: INCLUDES(brand) },
+    ...(variant === 'A' ? [{ bold: true, text: FEE_LINE } as Bold] : []),
+    'We believe your story would make a valuable addition to this edition and provide an opportunity to showcase your achievements to a wider professional audience.',
+    'Would you be interested in exploring this Cover Story opportunity? If so, simply reply to this email, and I would be happy to share the detailed feature proposal, participation options, and associated fees for your consideration.',
+    'We look forward to hearing from you.',
+    { lines: ['Warm regards,', senderName, SENDER.designation, name, `Office: ${SENDER.office}`, `WhatsApp: ${SENDER.whatsapp}`, `Website: ${BRANDS[brand].domain}`] },
+  ];
 }
 
-/**
- * The email to paste into the Apollo sequence's email step, once. Each person's subject, opener, edition, industry line
- * and unsubscribe link come from their custom fields, so every email is still personal; the rest is the same fixed pitch as draftEmail.
- */
-export function sequenceTemplate(style: UnsubscribeStyle = 'link'): { subject: string; body: string } {
-  return {
-    subject: fieldVariable('subject'),
-    body: [
-      'Hi {{#if first_name}}{{first_name}}{{#else}}there{{#endif}},',
-      '',
-      fieldVariable('opener'),
-      '',
-      afterOpener(fieldVariable('edition'), fieldVariable('industry')),
-      '',
-      PITCH_PARAGRAPHS.join('\n\n'),
-      // In the apollo style Apollo appends its own clickable Unsubscribe after the signature.
-      ...(style === 'apollo' ? [] : ['', unsubscribeLine(style, fieldVariable('unsubscribe'))]),
-    ].join('\n'),
-  };
+function toText(list: Block[]): string {
+  return list
+    .map((b) => (typeof b === 'string' ? b : 'bold' in b ? b.text : 'list' in b ? b.list.map((i) => `•  ${i}`).join('\n') : b.lines.join('\n')))
+    .join('\n\n');
 }
 
 const escapeHtml = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const P = 'margin:0 0 14px;';
+
+function toHtml(list: Block[]): string {
+  return list
+    .map((b) => {
+      if (typeof b === 'string') return `<p style="${P}">${escapeHtml(b)}</p>`;
+      if ('bold' in b) return `<p style="${P}"><strong>${escapeHtml(b.text)}</strong></p>`;
+      if ('list' in b) return `<ul style="margin:0 0 14px;padding-left:20px;">\n${b.list.map((i) => `<li style="margin:0 0 4px;">${escapeHtml(i)}</li>`).join('\n')}\n</ul>`;
+      return `<p style="${P}">${b.lines.map(escapeHtml).join('<br>')}</p>`;
+    })
+    .join('\n');
+}
+
+/** The last line of a plain-text email in the chosen style. `url` is the person's own unsubscribe link. */
+export function unsubscribeLine(style: UnsubscribeStyle, url: string): string {
+  if (style === 'apollo') return 'No longer interested in these messages? Unsubscribe';
+  if (style === 'button') return 'No longer want these emails?  [ Unsubscribe ]';
+  if (style === 'reply') return 'If you would rather not hear from us again, just reply "unsubscribe" and we will not contact you again.';
+  return `If you'd rather not hear from us, you can unsubscribe here: ${url}`;
+}
 
 /**
- * The Unsubscribe button: a small, plain grey button (a loud coloured one looks like marketing to spam filters), built
- * as a table so it shows as a button in Outlook too. `url` is the person's own unsubscribe link.
+ * The Unsubscribe button: a small, plain grey button (a loud coloured one looks like marketing to spam filters). The
+ * box is drawn by the link itself, so it survives editors that strip table styling.
  */
 export function unsubscribeButtonHtml(url: string): string {
   return [
     '<p style="margin:24px 0 8px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#777777;">No longer want these emails?</p>',
-    '<table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr>',
-    '<td style="border-radius:6px;background:#f2f3f5;border:1px solid #d5d8dc;">',
-    `<a href="${url}" target="_blank" style="display:inline-block;padding:8px 18px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;color:#333333;text-decoration:none;border-radius:6px;">Unsubscribe</a>`,
-    '</td></tr></table>',
+    `<p style="margin:0;"><a href="${url}" target="_blank" style="display:inline-block;padding:8px 18px;background:#f2f3f5;border:1px solid #d5d8dc;border-radius:6px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;color:#333333;text-decoration:none;">Unsubscribe</a></p>`,
   ].join('\n');
 }
 
-/**
- * The same email as sequenceTemplate, as HTML for Apollo's raw HTML editor, ending in the Unsubscribe button. Plain
- * paragraphs only (no images, no colours, no fonts beyond the button), so it still reads like a personal email.
- */
-export function sequenceTemplateHtml(): string {
-  const text = sequenceTemplate('reply').body.split('\n\n');
-  // The last paragraph of the text version is its unsubscribe line; the button replaces it.
-  const paragraphs = text.slice(0, -1).map((p) => `<p style="margin:0 0 14px;">${escapeHtml(p).replace(/\n/g, '<br>')}</p>`);
-  return [...paragraphs, unsubscribeButtonHtml(fieldVariable('unsubscribe'))].join('\n');
+export type DraftInput = { name: string; title: string; company: string; opener?: string; edition?: string; brand?: Brand; variant?: Variant; senderName?: string };
+export type Draft = { firstName: string; subject: string; body: string };
+
+/** The email one lead will read (plain text, without the unsubscribe line), for previews and exports. */
+export function draftEmail(p: DraftInput): Draft {
+  const firstName = firstNameOf(p.name);
+  const parts: EmailParts = {
+    firstName,
+    opener: p.opener?.trim() || fallbackOpenerFor(p.company),
+    role: roleFor(p.title, p.company),
+    edition: p.edition?.trim() || 'Top Business Leaders to Watch',
+  };
+  const body = toText(blocks(p.brand ?? 'hog', p.variant ?? 'A', parts, p.senderName || '[Sender name]', firstName || 'Sir or Madam'));
+  return { firstName, subject: subjectFor(p.company), body };
+}
+
+/** The first line when there is no news to congratulate them on: never wrong, since it only uses their company. */
+export function fallbackOpenerFor(company: string): string {
+  return company.trim() ? `Congratulations on your continued leadership at ${company.trim()}!` : 'Congratulations on your continued leadership!';
+}
+
+const TEMPLATE_PARTS: EmailParts = { firstName: '', opener: fieldVariable('opener'), role: fieldVariable('role'), edition: fieldVariable('edition') };
+const TEMPLATE_GREETING = '{{#if first_name}}{{first_name}}{{#else}}Sir or Madam{{#endif}}';
+
+/** The plain-text email to paste into the brand's Apollo sequence step: version A or B, ending in the chosen opt-out. */
+export function sequenceTemplate(brand: Brand = 'hog', variant: Variant = 'A', style: UnsubscribeStyle = 'button'): { subject: string; body: string } {
+  const body = toText(blocks(brand, variant, TEMPLATE_PARTS, SENDER_NAME_VARIABLES, TEMPLATE_GREETING));
+  return { subject: fieldVariable('subject'), body: style === 'apollo' ? body : `${body}\n\n${unsubscribeLine(style, fieldVariable('unsubscribe'))}` };
+}
+
+/** The same email as HTML for Apollo's raw HTML editor, ending in the Unsubscribe button. */
+export function sequenceTemplateHtml(brand: Brand = 'hog', variant: Variant = 'A'): string {
+  return `${toHtml(blocks(brand, variant, TEMPLATE_PARTS, SENDER_NAME_VARIABLES, TEMPLATE_GREETING))}\n${unsubscribeButtonHtml(fieldVariable('unsubscribe'))}`;
 }
