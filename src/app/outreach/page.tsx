@@ -31,9 +31,9 @@ type Preview = SavedPerson & { preview: { subject: string; body: string } };
 const SEQUENCE_KEY = 'hog-apollo-sequence';
 
 const STYLES: { id: UnsubscribeStyle; label: string; hint: string }[] = [
-  { id: 'apollo', label: "Apollo's one-click", hint: 'Gmail and Yahoo show an Unsubscribe button by the sender name (Google Workspace inboxes)' },
-  { id: 'reply', label: 'Reply to unsubscribe', hint: 'No link in the email at all; safest for spam filters' },
+  { id: 'apollo', label: 'Unsubscribe button', hint: 'A clickable Unsubscribe at the bottom of every email (added by Apollo), plus the Gmail and Yahoo button by the sender name' },
   { id: 'link', label: 'Our own link', hint: 'Signed link to this site; put the site on your own domain first' },
+  { id: 'reply', label: 'Reply to unsubscribe', hint: 'No link in the email at all' },
 ];
 
 const remembered = (key: string) => {
@@ -306,7 +306,7 @@ export default function OutreachPage() {
                 </div>
                 {data.unsubscribeStyle === 'apollo' && (
                   <p className="muted small" style={{ marginTop: 8 }}>
-                    In Apollo, open Settings, Profile, Email settings and turn on one-click unsubscribe, and set the opt-out message. Opt-outs are copied back here automatically.
+                    In Apollo, open Settings, Profile, Email settings: keep <b>Include one-click unsubscribe headers</b> on, keep <b>Append a sequences opt-out message after my signature</b> on with the text <code>No longer interested in these messages? &lt;%Unsubscribe%&gt;</code>, and turn open and click tracking off. Every email then ends with a clickable Unsubscribe, and opt-outs are copied back here automatically.
                   </p>
                 )}
                 {data.unsubscribeStyle === 'reply' && (

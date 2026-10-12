@@ -169,8 +169,10 @@ describe('price and unsubscribe styles', () => {
     expect(sequenceTemplate().body).toContain('USD 2,500');
   });
 
-  it("ends with Apollo's opt-out line, a reply-to-unsubscribe line with no link, or the engine's own link", () => {
-    expect(sequenceTemplate('apollo').body.endsWith('{{opt_out_message}}')).toBe(true);
+  it("leaves the clickable Unsubscribe to Apollo, or ends with a reply-to-unsubscribe line, or the engine's own link", () => {
+    // Apollo appends its own clickable Unsubscribe after the signature, so the template ends with the pitch.
+    expect(sequenceTemplate('apollo').body.endsWith('I will send over the details.')).toBe(true);
+    expect(sequenceTemplate('apollo').body).not.toContain('opt_out_message');
     const reply = sequenceTemplate('reply').body;
     expect(reply).toContain('just reply "unsubscribe"');
     expect(reply).not.toMatch(/https?:|\{\{HOG Unsubscribe link\}\}/);

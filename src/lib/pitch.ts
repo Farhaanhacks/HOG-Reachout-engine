@@ -14,7 +14,9 @@ export const PITCH = {
 /**
  * How the email lets people opt out:
  *  - link: the engine's own signed unsubscribe link (works with any mailbox).
- *  - apollo: Apollo's opt-out line ({{opt_out_message}}); with one-click unsubscribe turned on in Apollo, Gmail and Yahoo
+ *  - apollo: Apollo adds "No longer interested in these messages? Unsubscribe" after the signature, with "Unsubscribe" a
+ *    clickable word that opts the person out in one click ("Append a sequences opt-out message" on in Apollo's email
+ *    settings), so the template itself has no unsubscribe line. With one-click unsubscribe headers on, Gmail and Yahoo
  *    also show an Unsubscribe button next to the sender's name. Opt-outs are copied back from Apollo.
  *  - reply: no link at all; the person replies "unsubscribe". Apollo stops the sequence on any reply, and replies Apollo
  *    classes as unsubscribe or not interested are never contacted again.
@@ -70,8 +72,8 @@ export function unsubscribeLineText(url: string): string {
   return `If you'd rather not hear from Humans of Globe, you can unsubscribe here: ${url}`;
 }
 
-/** Apollo's variable for its own opt-out line. */
-export const APOLLO_OPT_OUT = '{{opt_out_message}}';
+/** What Apollo appends after the signature in the apollo style ("Unsubscribe" is the clickable word). */
+export const APOLLO_OPT_OUT = 'No longer interested in these messages? Unsubscribe';
 
 /** The last line of every email in the chosen style. `url` is the person's own unsubscribe link (link style only). */
 export function unsubscribeLine(style: UnsubscribeStyle, url: string): string {
@@ -139,8 +141,8 @@ export function sequenceTemplate(style: UnsubscribeStyle = 'link'): { subject: s
       afterOpener(`{{${CUSTOM_FIELDS.edition}}}`, `{{${CUSTOM_FIELDS.industry}}}`),
       '',
       PITCH_PARAGRAPHS.join('\n\n'),
-      '',
-      unsubscribeLine(style, `{{${CUSTOM_FIELDS.unsubscribe}}}`),
+      // In the apollo style Apollo appends its own clickable Unsubscribe after the signature.
+      ...(style === 'apollo' ? [] : ['', unsubscribeLine(style, `{{${CUSTOM_FIELDS.unsubscribe}}}`)]),
     ].join('\n'),
   };
 }
