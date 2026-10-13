@@ -190,3 +190,30 @@ export function sequenceTemplate(brand: Brand = 'hog', variant: Variant = 'A', s
 export function sequenceTemplateHtml(brand: Brand = 'hog', variant: Variant = 'A'): string {
   return `${toHtml(blocks(brand, variant, TEMPLATE_PARTS, TEMPLATE_SENDER, TEMPLATE_GREETING))}\n${unsubscribeButtonHtml(fieldVariable('unsubscribe'))}`;
 }
+
+/**
+ * The follow-up, sent the next day in the same thread (step 2 of each brand's sequence, "1 day" after step 1) to everyone
+ * who has not replied or unsubscribed; Apollo stops the sequence for those who have. It is the same for versions A and B
+ * and does not mention the fee, so the A/B test stays about the first email.
+ */
+function followUpBlocks(brand: Brand, p: Pick<EmailParts, 'role' | 'edition'>, senderName: string, greetingName: string): Block[] {
+  const name = BRANDS[brand].label;
+  return [
+    `Dear ${greetingName},`,
+    `I wanted to follow up on my note yesterday about featuring you on the cover of our upcoming special edition, "${p.edition}".`,
+    `Your recent achievement in ${p.role} is exactly the kind of leadership story our readers at ${name} look for, and we would be glad to share the full Cover Story proposal with you.`,
+    'Would you be open to taking a look? Simply reply to this email and I will send over the details.',
+    { lines: ['Warm regards,', senderName, SENDER.designation, name] },
+  ];
+}
+
+/** The follow-up for the brand's sequence step 2: plain text, ending in the chosen opt-out. Sent as a reply, so no subject. */
+export function followUpTemplate(brand: Brand = 'hog', style: UnsubscribeStyle = 'button'): { body: string } {
+  const body = toText(followUpBlocks(brand, TEMPLATE_PARTS, TEMPLATE_SENDER, TEMPLATE_GREETING));
+  return { body: style === 'apollo' ? body : `${body}\n\n${unsubscribeLine(style, fieldVariable('unsubscribe'))}` };
+}
+
+/** The follow-up as HTML for Apollo's raw HTML editor, ending in the Unsubscribe button. */
+export function followUpTemplateHtml(brand: Brand = 'hog'): string {
+  return `${toHtml(followUpBlocks(brand, TEMPLATE_PARTS, TEMPLATE_SENDER, TEMPLATE_GREETING))}\n${unsubscribeButtonHtml(fieldVariable('unsubscribe'))}`;
+}

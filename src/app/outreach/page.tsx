@@ -24,7 +24,7 @@ type Overview = {
   emailsPerPerson: number;
   unsubscribeStyle: UnsubscribeStyle;
   missingFields: string[];
-  template: { subject: string; versions: { variant: Variant; body: string; html: string }[] };
+  template: { subject: string; versions: { variant: Variant; body: string; html: string }[]; followUp: { body: string; html: string } };
   apolloError: string;
   status: OutreachStatus;
   held: SavedPerson[];
@@ -384,6 +384,24 @@ export default function OutreachPage() {
                   </details>
                 </div>
               ))}
+              <div className="draft">
+                <div className="card-head">
+                  <b>Step 2: follow-up, the next day</b>
+                  <div className="row">
+                    {data.template.followUp.html && (
+                      <button className="primary" onClick={() => copy('html-follow', data.template.followUp.html)}>{copied === 'html-follow' ? 'Copied' : 'Copy the HTML'}</button>
+                    )}
+                    <button onClick={() => copy('body-follow', data.template.followUp.body)}>{copied === 'body-follow' ? 'Copied' : 'Copy as plain text'}</button>
+                  </div>
+                </div>
+                <p className="muted small">
+                  In the sequence, add a second <b>Automatic email</b> step, set it to send <b>1 day</b> after step 1 as a <b>reply in the same thread</b> (no subject), paste this into its <code>{'<>'}</code> view and untick Include signature. Apollo stops it for anyone who replied or unsubscribed. Then set <b>Emails per person</b> to 2 on the <Link href="/targeting">Targeting</Link> page.
+                </p>
+                <details>
+                  <summary>Show the follow-up</summary>
+                  <pre>{data.template.followUp.body}</pre>
+                </details>
+              </div>
               {data.template.versions[0]?.html && (
                 <>
                   <div className="section-label">How the button looks</div>

@@ -6,7 +6,7 @@ import { getDb } from '../../../lib/db';
 import { syncMailboxes, type MailboxState } from '../../../lib/deliverability';
 import { fullEmail, heldBack, outreachDailyLimitFromEnv, outreachStatus, pendingOutreach, pushToApollo, sendTest, sendingRoom } from '../../../lib/outreach';
 import { personalizeNext, personalizeOne, setOpener } from '../../../lib/personalize';
-import { CUSTOM_FIELDS, sequenceTemplate, sequenceTemplateHtml } from '../../../lib/pitch';
+import { CUSTOM_FIELDS, followUpTemplate, followUpTemplateHtml, sequenceTemplate, sequenceTemplateHtml } from '../../../lib/pitch';
 import type { Variant } from '../../../lib/pitch';
 import { keysFromEnv } from '../../../lib/services';
 import { getSettings } from '../../../lib/settings';
@@ -60,6 +60,11 @@ export async function GET(req: Request) {
           body: sequenceTemplate(brand, v, settings.unsubscribeStyle).body,
           html: settings.unsubscribeStyle === 'button' ? sequenceTemplateHtml(brand, v) : '',
         })),
+        // Step 2: the next day, in the same thread.
+        followUp: {
+          body: followUpTemplate(brand, settings.unsubscribeStyle).body,
+          html: settings.unsubscribeStyle === 'button' ? followUpTemplateHtml(brand) : '',
+        },
       },
       unsubscribeStyle: settings.unsubscribeStyle,
       apolloError,

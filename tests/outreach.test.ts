@@ -3,7 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { listSequences } from '../src/lib/apollo-sequences';
 import type { Person } from '../src/lib/linkedin';
 import { APOLLO_LABEL, fullEmail, outreachStatus, pushToApollo, sendTest, testAddress, toApolloContact } from '../src/lib/outreach';
-import { sequenceTemplate, sequenceTemplateHtml } from '../src/lib/pitch';
+import { followUpTemplate, followUpTemplateHtml, sequenceTemplate, sequenceTemplateHtml } from '../src/lib/pitch';
 import type { Services } from '../src/lib/services';
 import { savePeople, type Db } from '../src/lib/store';
 import { mailboxStates } from '../src/lib/deliverability';
@@ -199,6 +199,18 @@ describe('the Cover Story template', () => {
     expect(a).toContain('Proposed Featuring Fee: USD 2500\n\nWe believe your story would make a valuable addition');
     expect(b).not.toContain('Featuring Fee');
     expect(a.replace('Proposed Featuring Fee: USD 2500\n\n', '')).toBe(b); // nothing else differs
+  });
+
+  it("has a next-day follow-up per brand, with the person's fields, the sender and the Unsubscribe button, and no fee", () => {
+    const t = followUpTemplate('gulficons').body;
+    expect(t).toContain('follow up on my note yesterday');
+    expect(t).toContain('"{{contact.HOG Edition}}"');
+    expect(t).toContain('in {{contact.HOG Role}} is exactly the kind of leadership story our readers at Gulf Icons look for');
+    expect(t).toContain('Warm regards,\n{{contact.HOG Sender}}\nBusiness Development Manager\nGulf Icons');
+    expect(t).not.toContain('Featuring Fee');
+    const html = followUpTemplateHtml('ciominds');
+    expect(html).toContain('<a href="{{contact.HOG Unsubscribe link}}"');
+    expect(html).toContain('CIO Minds');
   });
 
   it('ends with the chosen way to unsubscribe', () => {
