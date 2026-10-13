@@ -40,6 +40,7 @@ export async function GET(req: Request) {
       lastSync: await lastSync(db),
       apolloError,
       emailsPerPerson,
+      autoPause: (await getSettings(db)).autoPause,
       rules: { rampStart: RAMP_START, rampStep: RAMP_STEP, bounceLimit: BOUNCE_LIMIT, spamLimit: SPAM_LIMIT, minSent: MIN_SENT, windowDays: WINDOW_DAYS },
     });
   } catch (e) {

@@ -29,6 +29,7 @@ export async function POST(req: Request) {
         emailsPerPerson: body.emailsPerPerson,
         unsubscribeStyle: body.unsubscribeStyle,
         sequences: body.sequences,
+        autoPause: body.autoPause,
         reset,
       }) });
   } catch (e) {

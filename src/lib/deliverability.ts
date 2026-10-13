@@ -1,12 +1,13 @@
 import { listEmailAccounts } from './apollo-sequences';
 import { getJson, mapLimit, type Services } from './services';
+import { getSettings } from './settings';
 import { ensureSchema, type Db } from './store';
 
 /**
- * Keeping the sending domains healthy: the six inboxes on two domains take turns, each inbox has a daily limit that
- * starts low and rises over weeks (the warm-up ramp), and every inbox and domain is watched for bounces and spam blocks.
- * An inbox (or a whole domain) that crosses the limits is paused automatically: nobody new is given to it until the team
- * resumes it.
+ * Keeping the sending domains healthy: the inboxes take turns, each inbox has a daily limit that starts low and rises
+ * over weeks (the warm-up ramp), and every inbox and domain is watched for bounces and spam blocks. Only when the team
+ * switches auto-pause on (Deliverability page) is an inbox (or a whole domain) that crosses the limits paused
+ * automatically; it is off by default, so bounces alone never stop sending.
  *
  * Warming an inbox up (exchanging emails with a network of real inboxes) is done by a warm-up service, such as the
  * warm-up setting on each mailbox in Apollo; this file does everything around it.
@@ -166,6 +167,11 @@ export function pauseReason(h: Health): string {
  * together (one bad inbox is paused on its own, without taking its healthy neighbours down). Returns what it paused.
  */
 export async function autoPause(db: Db, emailsPerPerson: number): Promise<{ email: string; reason: string }[]> {
+  if (!(await getSettings(db)).autoPause) {
+    // Off: any pause made earlier is lifted, so bounces alone never keep an inbox from sending.
+    await db.query("UPDATE mailboxes SET paused_reason = '', paused_at = NULL WHERE paused_reason <> ''");
+    return [];
+  }
   const states = await mailboxStates(db, emailsPerPerson);
   const paused: { email: string; reason: string }[] = [];
   const rest = states.filter((s) => !pauseReason(s.health));

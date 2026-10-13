@@ -13,6 +13,7 @@ type Data = {
   lastSync: string;
   apolloError: string;
   emailsPerPerson: number;
+  autoPause: boolean;
   rules: { rampStart: number; rampStep: number; bounceLimit: number; spamLimit: number; minSent: number; windowDays: number };
 };
 
@@ -65,6 +66,18 @@ export default function DeliverabilityPage() {
     setBusy(false);
   }
 
+  async function setAutoPause(on: boolean) {
+    setBusy(true);
+    setError('');
+    try {
+      await api('/api/settings', post({ autoPause: on }));
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+    setBusy(false);
+  }
+
   async function checkDns() {
     if (!data) return;
     setBusy(true);
@@ -87,13 +100,29 @@ export default function DeliverabilityPage() {
         <div>
           <h1>Deliverability</h1>
           <p className="sub">
-            Your inboxes take turns across both domains. Each starts at {r?.rampStart ?? 20} emails a day and adds {r?.rampStep ?? 3} a day up to its own limit (warm-up ramp). Bounces and spam blocks are read from Apollo every time this page opens and before every send, and any inbox or domain over {r ? r.bounceLimit * 100 : 3}% bounces or {r ? r.spamLimit * 100 : 1}% spam blocks (over {r?.windowDays ?? 7} days) is paused automatically.
+            Each brand&apos;s inboxes take turns. Each starts at {r?.rampStart ?? 20} emails a day and adds {r?.rampStep ?? 3} a day up to its own limit (warm-up ramp). Bounces and spam blocks are read from Apollo every time this page opens and before every send; red means an inbox is over {r ? r.bounceLimit * 100 : 3}% bounces or {r ? r.spamLimit * 100 : 1}% spam blocks over {r?.windowDays ?? 7} days.
           </p>
         </div>
         <button onClick={load} disabled={loading || busy}>{loading ? 'Reading Apollo…' : 'Refresh'}</button>
       </div>
 
       {error && <p className="alert" role="alert">{error}</p>}
+      {data && (
+        <section className="card">
+          <div className="card-head">
+            <h2>Auto-pause on bounces</h2>
+            {data.autoPause ? <span className="badge ok">On</span> : <span className="badge warn">Off</span>}
+          </div>
+          <p className="muted small">
+            {data.autoPause
+              ? `On: an inbox (or a whole domain) over ${r ? r.bounceLimit * 100 : 3}% bounces or ${r ? r.spamLimit * 100 : 1}% spam blocks stops getting new people until you resume it.`
+              : 'Off: bounces never stop sending. Keep an eye on the bounce rates below; if they climb past about 3%, Gmail and Outlook start sending the whole domain to spam. Apollo’s own Bounce Guard (Settings, Email setup and health, Sending policies) can still pause a sequence on a big spike.'}
+          </p>
+          <div className="row">
+            <button onClick={() => setAutoPause(!data.autoPause)} disabled={busy}>{data.autoPause ? 'Switch auto-pause off' : 'Switch auto-pause on'}</button>
+          </div>
+        </section>
+      )}
       {data?.apolloError && <p className="alert">Could not reach Apollo: {data.apolloError}</p>}
       {data?.paused.map((p) => <p key={p.email} className="alert">Paused {p.email}: {p.reason}. Nobody new is given to it until you resume it.</p>)}
 

@@ -15,9 +15,11 @@ export type Settings = {
   unsubscribeStyle: UnsubscribeStyle;
   /** Each brand's Apollo sequence, used by Run workflow and the Outreach page. */
   sequences: Partial<Record<Brand, string>>;
+  /** Pause an inbox automatically when its bounces or spam blocks cross the limits. Off unless the team switches it on. */
+  autoPause: boolean;
 };
 
-export const DEFAULT_SETTINGS: Settings = { rules: DEFAULT_RULES, editions: DEFAULT_EDITIONS, emailsPerPerson: 3, unsubscribeStyle: 'button', sequences: {} };
+export const DEFAULT_SETTINGS: Settings = { rules: DEFAULT_RULES, editions: DEFAULT_EDITIONS, emailsPerPerson: 3, unsubscribeStyle: 'button', sequences: {}, autoPause: false };
 
 export function cleanSequences(v: unknown): Partial<Record<Brand, string>> {
   const out: Partial<Record<Brand, string>> = {};
@@ -59,12 +61,13 @@ export async function setSetting(db: Db, key: string, value: unknown): Promise<v
 
 export async function getSettings(db: Db): Promise<Settings> {
   await ensureSchema(db);
-  const [rules, editions, emailsPerPerson, unsubscribeStyle, sequences] = await Promise.all([
+  const [rules, editions, emailsPerPerson, unsubscribeStyle, sequences, autoPause] = await Promise.all([
     read(db, 'rules'),
     read(db, 'editions'),
     read(db, 'emailsPerPerson'),
     read(db, 'unsubscribeStyle'),
     read(db, 'sequences'),
+    read(db, 'autoPause'),
   ]);
   return {
     rules: rules === undefined ? DEFAULT_RULES : cleanRules(rules),
@@ -72,6 +75,7 @@ export async function getSettings(db: Db): Promise<Settings> {
     emailsPerPerson: emailsPerPerson === undefined ? DEFAULT_SETTINGS.emailsPerPerson : cleanEmailsPerPerson(emailsPerPerson),
     unsubscribeStyle: cleanUnsubscribeStyle(unsubscribeStyle),
     sequences: cleanSequences(sequences),
+    autoPause: autoPause === true,
   };
 }
 
@@ -85,5 +89,10 @@ export async function saveSettings(db: Db, input: Partial<Record<keyof Settings,
   if (input.unsubscribeStyle !== undefined) await setSetting(db, 'unsubscribeStyle', cleanUnsubscribeStyle(input.unsubscribeStyle));
   // One brand's sequence can be changed without touching the others.
   if (input.sequences !== undefined) await setSetting(db, 'sequences', { ...(await getSettings(db)).sequences, ...cleanSequences(input.sequences) });
+  if (input.autoPause !== undefined) {
+    await setSetting(db, 'autoPause', input.autoPause === true);
+    // Switching it off also lifts the pauses it made, so every inbox sends again.
+    if (input.autoPause !== true) await db.query("UPDATE mailboxes SET paused_reason = '', paused_at = NULL WHERE paused_reason <> ''").catch(() => {});
+  }
   return getSettings(db);
 }
