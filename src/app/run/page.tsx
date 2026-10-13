@@ -9,6 +9,7 @@ import { api, countryName, formatDate, personalizeWaiting, post } from '../../li
 import type { EnrichStatus } from '../../lib/enrich';
 import { marketShort } from '../../lib/markets';
 import type { PushSummary } from '../../lib/outreach';
+import type { AutopilotStatus } from '../../lib/autopilot';
 import type { Run, StepSummary } from '../../lib/run';
 
 type BrandSetup = {
@@ -51,6 +52,8 @@ export default function RunWorkflowPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const stop = useRef(false);
+  const [auto, setAuto] = useState<(AutopilotStatus & { secretSet: boolean }) | null>(null);
+  const [siteUrl, setSiteUrl] = useState('');
 
   const loadSetup = useCallback(() => {
     api<Setup>('/api/workflow').then(setSetup).catch((e: Error) => setError(e.message));
@@ -58,10 +61,30 @@ export default function RunWorkflowPage() {
   const loadHistory = useCallback(() => {
     api<{ runs: Run[] }>('/api/runs').then((d) => setHistory(d.runs)).catch(() => {});
   }, []);
+  const loadAuto = useCallback(() => {
+    api<AutopilotStatus & { secretSet: boolean }>('/api/autopilot').then(setAuto).catch(() => {});
+  }, []);
   useEffect(() => {
     loadSetup();
     loadHistory();
-  }, [loadSetup, loadHistory]);
+    loadAuto();
+    setSiteUrl(window.location.origin);
+    // The autopilot works in the background; keep its status fresh while the page is open.
+    const t = setInterval(() => {
+      loadAuto();
+      loadHistory();
+    }, 30_000);
+    return () => clearInterval(t);
+  }, [loadSetup, loadHistory, loadAuto]);
+
+  async function setAutopilot(change: { enabled?: boolean; perHour?: number }) {
+    if (change.enabled && !window.confirm(`Switch the autopilot on? Every hour, around the clock, it finds ${auto?.autopilot.perHour ?? 30} leads and sends them through Apollo with nobody watching. Each hour uses about as many Apollo credits as leads.`)) return;
+    try {
+      setAuto(await api('/api/autopilot', post(change)));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
 
   const say = (line: string) => setLog((l) => [...l, line]);
 
@@ -238,6 +261,55 @@ export default function RunWorkflowPage() {
         </section>
       </div>
 
+      <section className="card">
+        <div className="card-head">
+          <h2>Autopilot</h2>
+          {auto && (auto.autopilot.enabled ? <span className="badge ok">On · {auto.autopilot.perHour} leads every hour, 24/7</span> : <span className="badge">Off</span>)}
+        </div>
+        <p className="muted small">
+          Runs the whole workflow every hour, around the clock, with nobody watching: finds the leads (split 40/30/30), writes the emails and sends each brand&apos;s leads into its sequence. Leads an inbox has no room for today go out later on their own. It needs an outside scheduler to call the site every 2 minutes (below).
+        </p>
+        <div className="row">
+          <label className="check">
+            Leads every hour
+            <input
+              key={auto?.autopilot.perHour}
+              type="number"
+              min={1}
+              max={100}
+              defaultValue={auto?.autopilot.perHour ?? 30}
+              onBlur={(e) => Number(e.target.value) !== auto?.autopilot.perHour && setAutopilot({ perHour: Number(e.target.value) })}
+              style={{ width: 80 }}
+            />
+          </label>
+          {auto?.autopilot.enabled ? (
+            <button className="danger" onClick={() => setAutopilot({ enabled: false })}>Switch autopilot off</button>
+          ) : (
+            <button className="primary" onClick={() => setAutopilot({ enabled: true })} disabled={!auto?.secretSet || blockers.length > 0}>Switch autopilot on</button>
+          )}
+        </div>
+        {auto && !auto.secretSet && <p className="warn-note">Add <code>CRON_SECRET</code> in Vercel (a long random string, at least 16 characters), redeploy, then set up the scheduler below.</p>}
+        {auto && (
+          <div className="stats">
+            <div className="stat"><div className="n">{auto.today.runs}</div><div className="l">Runs today</div></div>
+            <div className="stat"><div className="n">{auto.today.found}</div><div className="l">Leads found today</div></div>
+            <div className="stat"><div className="n">{auto.current ? (auto.current.status === 'running' ? auto.current.phase || 'running' : auto.current.status) : '—'}</div><div className="l">Latest run</div></div>
+            <div className="stat"><div className="n">{auto.lastTick ? formatDate(auto.lastTick.at) : 'never'}</div><div className="l">Last scheduler call</div></div>
+          </div>
+        )}
+        {auto?.lastTick?.log.length ? <div className="log">{auto.lastTick.log.join('\n')}</div> : null}
+        <details>
+          <summary>Set up the scheduler (cron-job.org, free)</summary>
+          <ol className="muted small steps-list">
+            <li>Sign up at cron-job.org and click <b>Create cronjob</b>.</li>
+            <li>URL: <code>{siteUrl || 'https://your-site'}/api/cron/tick</code></li>
+            <li>Schedule: <b>every 2 minutes</b>.</li>
+            <li>Under Advanced, add a header <code>Authorization</code> with the value <code>Bearer </code> followed by your <code>CRON_SECRET</code>. (No header option? Use the URL <code>…/api/cron/tick?key=</code> followed by the secret.)</li>
+            <li>Save, then switch the autopilot on here. &quot;Last scheduler call&quot; updates within two minutes.</li>
+          </ol>
+        </details>
+      </section>
+
       {run && (
         <section className="card">
           <div className="card-head">
@@ -270,12 +342,13 @@ export default function RunWorkflowPage() {
           <div className="table-wrap">
             <table>
               <thead>
-                <tr><th>Started</th><th>Markets</th><th className="num">Leads</th>{BRAND_LIST.map((b) => <th key={b} className="num">{BRANDS[b].label}</th>)}<th className="num">Credits</th><th>Status</th></tr>
+                <tr><th>Started</th><th>By</th><th>Markets</th><th className="num">Leads</th>{BRAND_LIST.map((b) => <th key={b} className="num">{BRANDS[b].label}</th>)}<th className="num">Credits</th><th>Status</th></tr>
               </thead>
               <tbody>
                 {history.map((h) => (
                   <tr key={String(h.id)}>
                     <td>{formatDate(h.created_at)}</td>
+                    <td className="small">{h.auto ? <span className="badge accent">Autopilot</span> : 'Button'}</td>
                     <td className="small">{countryName(h.geo)}</td>
                     <td className="num">{h.apollo_with_email}{h.brief.target ? `/${h.brief.target}` : ''}</td>
                     {BRAND_LIST.map((b) => <td key={b} className="num">{h.brand_ready[b] ?? '—'}</td>)}

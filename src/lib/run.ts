@@ -38,6 +38,10 @@ type RunRow = {
   status: 'running' | 'done' | 'stopped';
   error: string;
   brand_ready?: string | null;
+  /** Started by the autopilot (the hourly scheduler) rather than the Run workflow button. */
+  auto?: boolean;
+  /** Autopilot stage: finding, writing, sending (then the run is done). */
+  phase?: string;
 };
 
 /** What a run is asked for: these markets, until this many new leads can be emailed, split between the brands. */
@@ -107,7 +111,7 @@ function toRun(r: RunRow): Run {
  * Starts a run. Searches take turns by market (Africa and Europe twice as often as the US and the UAE) and, within a
  * market, by search; each search continues from the page earlier runs stopped at, so every run finds new people.
  */
-export async function createRun(db: Db, brief: { markets?: string[]; target?: number } = {}, opts: { maxSteps?: number } = {}): Promise<Run> {
+export async function createRun(db: Db, brief: { markets?: string[]; target?: number } = {}, opts: { maxSteps?: number; auto?: boolean } = {}): Promise<Run> {
   const markets = [...new Set(brief.markets ?? MARKET_LIST)].filter(isMarket);
   if (!markets.length) throw new Error('Choose at least one market.');
   const target = clamp(brief.target ?? DEFAULT_TARGET, 1, 2000);
@@ -148,10 +152,12 @@ export async function createRun(db: Db, brief: { markets?: string[]; target?: nu
   }
   if (!queries.length) throw new Error('Every search has been read to the end. Add titles on the Targeting page to find new people.');
 
-  const [row] = await db.query<RunRow>('INSERT INTO runs (geo, brief, queries, pages) VALUES ($1, $2, $3, 1) RETURNING *', [
+  const [row] = await db.query<RunRow>('INSERT INTO runs (geo, brief, queries, pages, auto, phase) VALUES ($1, $2, $3, 1, $4, $5) RETURNING *', [
     markets.join(','),
     JSON.stringify({ markets, target, quotas: quotasFor(target) } satisfies RunBrief),
     JSON.stringify(queries),
+    !!opts.auto,
+    opts.auto ? 'finding' : '',
   ]);
   return toRun(row);
 }
