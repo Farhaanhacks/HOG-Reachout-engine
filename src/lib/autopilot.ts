@@ -9,7 +9,8 @@ import { ensureSchema, type Db } from './store';
 
 /**
  * Autopilot: one run every hour, around the clock, with nobody at the keyboard. An outside scheduler (cron-job.org)
- * calls the tick endpoint every couple of minutes; each call moves the hour's run on for up to ~45 seconds:
+ * calls the tick endpoint every couple of minutes; it answers at once and each call then moves the hour's run on in the
+ * background for up to ~45 seconds:
  *   finding (Apollo search and lookups, split 40/30/30 between the brands) → writing (the personal emails) →
  *   sending (each brand's waiting leads into its own sequence, from its own inboxes) → done.
  * Leads an inbox has no room for today stay waiting and go out on a later tick. A run that is still unfinished three
