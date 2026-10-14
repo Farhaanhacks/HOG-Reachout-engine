@@ -80,8 +80,8 @@ export default function TargetingPage() {
           <span className="badge">Each about {Math.round(100 / ICPS.length)}% of every run</span>
         </div>
         <p className="muted small">
-          Each is an Apollo People Search: people with one of the titles and seniorities, at companies Apollo tags with one of the keywords, of that size, based in
-          those countries. Only verified emails. A lead goes to one brand for good: Gulf Icons (Gulf), CIO Minds (US, Europe, Singapore) or Humans of Globe (Gulf, US, Europe).
+          Each is searched in two steps: Apollo&apos;s company search finds companies tagged with one of the keywords, of that size, in those countries (1 credit per 100
+          companies, each page paid for once); then People Search (free) finds people there with one of the titles and seniorities. Only verified emails. A lead goes to one brand for good: Gulf Icons (Gulf), CIO Minds (US, Europe, Singapore) or Humans of Globe (Gulf, US, Europe).
         </p>
         <div className="table-wrap">
           <table>

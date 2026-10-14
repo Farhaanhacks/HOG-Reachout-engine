@@ -1,5 +1,19 @@
 import { bulkMatch, type ApolloMatch } from './apollo';
-import { MAX_PAGE, PER_PAGE, icpSearches, searchPeople, searchesFor, type SearchSpec } from './apollo-search';
+import {
+  COMPANIES_PER_PEOPLE_SEARCH,
+  COMPANY_MAX_PAGE,
+  COMPANY_PER_PAGE,
+  MAX_PAGE,
+  PEOPLE_PAGES_PER_COMPANIES,
+  PEOPLE_PER_PAGE_AT_COMPANIES,
+  PER_PAGE,
+  icpSearches,
+  searchCompanies,
+  searchPeople,
+  searchesFor,
+  type FoundPerson,
+  type SearchSpec,
+} from './apollo-search';
 import { DEFAULT_DAILY_LIMIT, enrichStatus, runEnrichment, statusOf, type EnrichSummary } from './enrich';
 import { companyKey, emailDomain, linkedinKey, normDomain } from './keys';
 import { BRAND_LIST, brandsForMarket, eligibleBrands, isBrand, pickBrand, quotasFor, type Quotas } from './brands';
@@ -180,7 +194,7 @@ export async function createRun(db: Db, brief: { markets?: string[]; target?: nu
       specs
         .filter((spec) => markets.includes(spec.market))
         .map((spec) => ({ spec, h: history.get(`${spec.market}|${spec.key}`) ?? { pages: 0, exhausted: false } }))
-        .filter((x) => !x.h.exhausted && x.h.pages < MAX_PAGE)
+        .filter((x) => !x.h.exhausted && x.h.pages < maxPageOf(x.spec))
         .map((x) => ({ spec: x.spec, next: x.h.pages + 1 })),
     );
   }
@@ -198,8 +212,10 @@ export async function createRun(db: Db, brief: { markets?: string[]; target?: nu
     pointer.set(m, i + 1);
     const item = list[i];
     queries.push({ ...item.spec, page: item.next });
-    item.next++;
-    if (item.next > MAX_PAGE) list.splice(i, 1);
+    // An ICP search reads its current company page until everyone suitable there is looked up (see icpPeople), so it
+    // is planned as often as needed without moving on; other searches read one new page each time.
+    if (!isCompanySearch(item.spec)) item.next++;
+    if (item.next > maxPageOf(item.spec)) list.splice(i, 1);
   }
   if (!queries.length) throw new Error('Every search has been read to the end. Add titles on the Targeting page to find new people.');
   const quotas = quotasFor(target);
@@ -225,6 +241,57 @@ export async function getRun(db: Db, id: number | string): Promise<Run | null> {
 export async function listRuns(db: Db, limit = 20): Promise<Run[]> {
   await ensureSchema(db);
   return (await db.query<RunRow>('SELECT * FROM runs ORDER BY id DESC LIMIT $1', [clamp(limit, 1, 100)])).map(toRun);
+}
+
+const isCompanySearch = (spec: SearchSpec) => !!spec.companyKeywords?.length;
+const maxPageOf = (spec: SearchSpec) => (isCompanySearch(spec) ? COMPANY_MAX_PAGE : MAX_PAGE);
+
+/**
+ * The people an ICP search offers now: its current page of companies (pages already fully worked through are skipped),
+ * fetched from Apollo's company search only the first time (1 credit) and kept, then People Search (free) for the ICP's
+ * titles and seniorities at those companies, 50 companies at a time.
+ */
+async function icpPeople(
+  svc: Services,
+  db: Db,
+  q: RunQuery,
+): Promise<{ page: number; people: FoundPerson[]; credits: number; lastPage: boolean; allRead: boolean }> {
+  const [done] = await db.query<{ pages_done: number; exhausted: boolean }>('SELECT pages_done, exhausted FROM searched_queries WHERE geo = $1 AND query = $2', [
+    q.market,
+    q.key,
+  ]);
+  const page = (done?.pages_done ?? 0) + 1;
+  // Every company page has been worked through: nothing more to find, and nothing to pay for.
+  if (done?.exhausted) return { page: page - 1, people: [], credits: 0, lastPage: true, allRead: true };
+  let credits = 0;
+  let ids: string[];
+  const [kept] = await db.query<{ company_ids: string }>('SELECT company_ids FROM company_pages WHERE geo = $1 AND query = $2 AND page = $3', [q.market, q.key, page]);
+  if (kept) ids = JSON.parse(kept.company_ids) as string[];
+  else {
+    ids = (await searchCompanies(svc, q, page)).ids;
+    credits = 1;
+    await db.query('INSERT INTO company_pages (geo, query, page, company_ids) VALUES ($1, $2, $3, $4) ON CONFLICT (geo, query, page) DO NOTHING', [
+      q.market,
+      q.key,
+      page,
+      JSON.stringify(ids),
+    ]);
+  }
+  const people = new Map<string, FoundPerson>();
+  let allRead = true;
+  for (let i = 0; i < ids.length; i += COMPANIES_PER_PEOPLE_SEARCH) {
+    const organizationIds = ids.slice(i, i + COMPANIES_PER_PEOPLE_SEARCH);
+    for (let p = 1; ; p++) {
+      const res = await searchPeople(svc, q, p, { organizationIds, perPage: PEOPLE_PER_PAGE_AT_COMPANIES });
+      for (const person of res.people) people.set(person.id, person);
+      if (res.people.length < PEOPLE_PER_PAGE_AT_COMPANIES) break;
+      if (p >= PEOPLE_PAGES_PER_COMPANIES) {
+        allRead = false;
+        break;
+      }
+    }
+  }
+  return { page, people: [...people.values()], credits, lastPage: ids.length < COMPANY_PER_PAGE || page >= COMPANY_MAX_PAGE, allRead };
 }
 
 /** Saves one looked-up person with everything the brief asks for. Returns whether they are new and ready to email. */
@@ -340,20 +407,32 @@ export async function runStep(svc: Services, db: Db, id: number | string, opts: 
   }
   const settings = await getSettings(db);
 
-  let found: Awaited<ReturnType<typeof searchPeople>>;
+  // An ICP search: its current page of companies, then the people there. Any other search: one page of People Search.
+  let found: { people: FoundPerson[] };
+  let icp: Awaited<ReturnType<typeof icpPeople>> | null = null;
   try {
-    found = await searchPeople(svc, q, q.page);
+    if (isCompanySearch(q)) {
+      icp = await icpPeople(svc, db, q);
+      found = icp;
+    } else found = await searchPeople(svc, q, q.page);
   } catch (e) {
     await db.query('UPDATE runs SET error = $2 WHERE id = $1', [id, `Search ${index + 1}: ${(e as Error).message}`]);
     throw e;
   }
   summary.searched = found.people.length;
-  await db.query(
-    `INSERT INTO searched_queries (geo, query, pages_done, exhausted, last_at) VALUES ($1, $2, $3, $4, now())
-     ON CONFLICT (geo, query) DO UPDATE SET pages_done = GREATEST(searched_queries.pages_done, EXCLUDED.pages_done),
-       exhausted = searched_queries.exhausted OR EXCLUDED.exhausted, last_at = now()`,
-    [q.market, q.key, q.page, found.people.length < PER_PAGE || q.page >= MAX_PAGE],
-  );
+  if (icp?.credits) {
+    summary.credits += icp.credits;
+    // Counted with the lookups, so APOLLO_DAILY_LIMIT caps every credit the engine spends.
+    await db.query('INSERT INTO enrichment_log (requested, matched, with_email, credits) VALUES ($1, 0, 0, $2)', [icp.credits, icp.credits]);
+  }
+  const markSearched = (pagesDone: number, exhausted: boolean) =>
+    db.query(
+      `INSERT INTO searched_queries (geo, query, pages_done, exhausted, last_at) VALUES ($1, $2, $3, $4, now())
+       ON CONFLICT (geo, query) DO UPDATE SET pages_done = GREATEST(searched_queries.pages_done, EXCLUDED.pages_done),
+         exhausted = searched_queries.exhausted OR EXCLUDED.exhausted, last_at = now()`,
+      [q.market, q.key, pagesDone, exhausted],
+    );
+  if (!icp) await markSearched(q.page, found.people.length < PER_PAGE || q.page >= MAX_PAGE);
 
   // Before paying for anyone: a wanted title, an email on record, not saved already, not at a client company.
   const wanted = found.people.filter((p) => p.hasEmail && matchTitle(p.title, q.titles));
@@ -361,15 +440,20 @@ export async function runStep(svc: Services, db: Db, id: number | string, opts: 
   const ids = wanted.map((p) => p.id);
   const saved = new Set(
     ids.length
-      ? (await db.query<{ apollo_person_id: string }>(`SELECT apollo_person_id FROM people WHERE apollo_person_id IN (${ids.map((_, i) => `$${i + 1}`).join(', ')})`, ids)).map(
-          (r) => r.apollo_person_id,
-        )
+      ? (
+          await db.query<{ apollo_person_id: string }>(
+            `SELECT apollo_person_id FROM people WHERE apollo_person_id IN (${ids.map((_, i) => `$${i + 1}`).join(', ')})
+             UNION SELECT apollo_person_id FROM apollo_misses WHERE apollo_person_id IN (${ids.map((_, i) => `$${i + 1}`).join(', ')})`,
+            ids,
+          )
+        ).map((r) => r.apollo_person_id)
       : [],
   );
   const clients = await clientCompanies(db, wanted.map((p) => p.company));
   const fresh = wanted.filter((p) => !saved.has(p.id) && !clients.has(companyKey(p.company)));
   // Never pay for more people than this search may still bring: a run of 10 looks up about 10, not a whole page.
-  const toLookUp = fresh.slice(0, Math.min(room, run.brief.target ? searchNeed : room));
+  const budget = room - (icp?.credits ?? 0);
+  const toLookUp = fresh.slice(0, Math.max(0, Math.min(budget, run.brief.target ? searchNeed : budget)));
   summary.skipped = found.people.length - toLookUp.length;
 
   let matches: (ApolloMatch | null)[] = [];
@@ -377,17 +461,20 @@ export async function runStep(svc: Services, db: Db, id: number | string, opts: 
     try {
       const r = await bulkMatch(svc, toLookUp.map((p) => ({ id: p.id })));
       matches = r.matches;
-      summary.credits = r.credits;
+      summary.credits += r.credits;
     } catch (e) {
       const partial = (e as Error & { partial?: { matches: (ApolloMatch | null)[]; credits: number } }).partial;
       matches = partial?.matches ?? [];
-      summary.credits = partial?.credits ?? 0;
+      summary.credits += partial?.credits ?? 0;
       summary.stopped = (e as Error).message;
     }
   }
   let inserted = 0;
   let updated = 0;
   let withEmail = 0;
+  // Anyone Apollo could not match is remembered, so they are never paid for again.
+  const missed = summary.stopped ? [] : toLookUp.filter((_, i) => !matches[i]).map((p) => p.id);
+  for (const miss of missed) await db.query('INSERT INTO apollo_misses (apollo_person_id) VALUES ($1) ON CONFLICT DO NOTHING', [miss]);
   for (let i = 0; i < matches.length; i++) {
     const m = matches[i];
     if (!m) continue;
@@ -414,12 +501,19 @@ export async function runStep(svc: Services, db: Db, id: number | string, opts: 
     }
   }
   summary.lookedUp = matches.length;
+  // An ICP's company page is done once everyone suitable at those companies has been looked up; until then the next run
+  // keeps working through it, free.
+  if (icp) {
+    const used = !summary.stopped && icp.allRead && fresh.length <= toLookUp.length;
+    // (People not matched just now are remembered above, so they do not hold the page open.)
+    await markSearched(used ? icp.page : icp.page - 1, used && icp.lastPage);
+  }
   if (matches.length) {
     await db.query('INSERT INTO enrichment_log (requested, matched, with_email, credits) VALUES ($1, $2, $3, $4)', [
       matches.length,
       matches.filter(Boolean).length,
       withEmail,
-      summary.credits,
+      summary.credits - (icp?.credits ?? 0), // the company page was logged on its own above
     ]);
   }
   // A failed lookup leaves the run on this page, so the people not looked up are tried again.

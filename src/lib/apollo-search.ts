@@ -4,12 +4,25 @@ import { getJson, type Services } from './services';
 import { SECTORS, SECTOR_LABEL, type Sector, type TitleRules } from './targeting';
 
 /**
- * Apollo People Search: finds people by title, where they are based, company size and verified email, and costs no
- * credits. It returns Apollo ids, first names, titles and company names only; the full record (email, LinkedIn,
+ * Apollo People Search: finds people by title, seniority, where they are based, company size and verified email, and
+ * costs no credits. It returns Apollo ids, first names, titles and company names only; the full record (email, LinkedIn,
  * website, industry, size, country) comes from bulk_match by id, which costs credits.
+ *
+ * People Search cannot filter by what a company does (its keyword tags). So an ICP search is two steps: Apollo's company
+ * search finds companies by keyword, size and country (1 credit per page of 100), then People Search finds the right
+ * people at exactly those companies (free).
  */
 
 const URL_BASE = 'https://api.apollo.io/api/v1/mixed_people/api_search';
+const COMPANY_URL = 'https://api.apollo.io/api/v1/mixed_companies/search';
+
+/** Companies per company-search page (Apollo's most), each page costing 1 credit; Apollo shows at most 500 pages. */
+export const COMPANY_PER_PAGE = 100;
+export const COMPANY_MAX_PAGE = 500;
+/** Companies per People Search, so the request stays a safe length; and the most people pages read for them. */
+export const COMPANIES_PER_PEOPLE_SEARCH = 50;
+export const PEOPLE_PAGES_PER_COMPANIES = 3;
+export const PEOPLE_PER_PAGE_AT_COMPANIES = 100;
 
 /** Results per search page. 50 keeps each step (one search plus the lookups it leads to) well under a minute. */
 export const PER_PAGE = 50;
@@ -33,7 +46,8 @@ export type SearchSpec = {
   lane?: string;
   /** The countries searched, when only some of the market's (an ICP's UK and Germany, say). */
   locations?: string[];
-  /** Apollo company keyword tags ("cybersecurity", "AWS partner"); a company with any of them matches. */
+  /** Apollo company keyword tags ("cybersecurity", "AWS partner"); a company with any of them matches. Searched through
+   * Apollo's company search first (see icpPeople in run.ts), since People Search ignores them. */
   companyKeywords?: string[];
   /** Apollo seniorities (owner, founder, c_suite, partner). */
   seniorities?: string[];
@@ -52,20 +66,51 @@ function query(params: Record<string, string | number | boolean | string[] | und
   return parts.join('&');
 }
 
-/** The search's address. Only people Apollo holds a verified email for are asked for. */
-export function searchUrl(spec: SearchSpec, page: number): string {
+const locationsOf = (spec: SearchSpec) => (spec.locations?.length ? spec.locations : MARKETS[spec.market].countries);
+
+/**
+ * The People Search address. Only people Apollo holds a verified email for are asked for. With `organizationIds`, only
+ * people at those companies (the company search already applied the size, so it is not repeated).
+ */
+export function searchUrl(spec: SearchSpec, page: number, opts: { organizationIds?: string[]; perPage?: number } = {}): string {
+  const atCompanies = !!opts.organizationIds?.length;
   return `${URL_BASE}?${query({
     'person_titles': spec.titles,
     include_similar_titles: true,
     'person_seniorities': spec.seniorities,
-    'person_locations': spec.locations?.length ? spec.locations : MARKETS[spec.market].countries,
-    'organization_num_employees_ranges': spec.ranges,
-    'q_organization_keyword_tags': spec.companyKeywords,
+    'person_locations': locationsOf(spec),
+    'organization_ids': opts.organizationIds,
+    'organization_num_employees_ranges': atCompanies ? undefined : spec.ranges,
     'contact_email_status': ['verified'],
     q_keywords: spec.keywords,
     page,
-    per_page: PER_PAGE,
+    per_page: opts.perPage ?? PER_PAGE,
   })}`;
+}
+
+/** The company search address: companies with any of the ICP's keyword tags, of its size, based in its countries. */
+export function companySearchUrl(spec: SearchSpec, page: number): string {
+  return `${COMPANY_URL}?${query({
+    'q_organization_keyword_tags': spec.companyKeywords,
+    'organization_num_employees_ranges': spec.ranges,
+    'organization_locations': locationsOf(spec),
+    page,
+    per_page: COMPANY_PER_PAGE,
+  })}`;
+}
+
+const headers = (key: string) => ({ 'x-api-key': key, 'content-type': 'application/json', accept: 'application/json', 'cache-control': 'no-cache' });
+
+/** One page of Apollo's company search (1 credit): the companies' Apollo ids. */
+export async function searchCompanies(svc: Services, spec: SearchSpec, page: number): Promise<{ total: number; ids: string[] }> {
+  const key = svc.keys.apollo;
+  if (!key) throw new Error('APOLLO_API_KEY is not set');
+  const res = await getJson<{ organizations?: { id?: string | null }[]; pagination?: { total_entries?: number } }>(svc, companySearchUrl(spec, page), {
+    method: 'POST',
+    headers: headers(key),
+  });
+  const ids = [...new Set((res.organizations ?? []).map((o) => String(o.id ?? '')).filter(Boolean))];
+  return { total: Number(res.pagination?.total_entries) || 0, ids };
 }
 
 type SearchResponse = {
@@ -73,13 +118,15 @@ type SearchResponse = {
   people?: { id?: string; first_name?: string | null; title?: string | null; has_email?: boolean | null; organization?: { name?: string | null } | null }[];
 };
 
-export async function searchPeople(svc: Services, spec: SearchSpec, page: number): Promise<{ total: number; people: FoundPerson[] }> {
+export async function searchPeople(
+  svc: Services,
+  spec: SearchSpec,
+  page: number,
+  opts: { organizationIds?: string[]; perPage?: number } = {},
+): Promise<{ total: number; people: FoundPerson[] }> {
   const key = svc.keys.apollo;
   if (!key) throw new Error('APOLLO_API_KEY is not set');
-  const res = await getJson<SearchResponse>(svc, searchUrl(spec, page), {
-    method: 'POST',
-    headers: { 'x-api-key': key, 'content-type': 'application/json', accept: 'application/json', 'cache-control': 'no-cache' },
-  });
+  const res = await getJson<SearchResponse>(svc, searchUrl(spec, page, opts), { method: 'POST', headers: headers(key) });
   return {
     total: Number(res.total_entries) || 0,
     people: (res.people ?? [])

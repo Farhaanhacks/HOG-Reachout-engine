@@ -211,6 +211,18 @@ export async function ensureSchema(db: Db): Promise<void> {
     last_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (geo, query)
   )`);
+  // Each page of companies an ICP's company search returned (1 credit each), kept so the people at them are worked
+  // through over as many runs as it takes without paying for the page again.
+  await db.query(`CREATE TABLE IF NOT EXISTS company_pages (
+    geo TEXT NOT NULL,
+    query TEXT NOT NULL,
+    page INTEGER NOT NULL,
+    company_ids TEXT NOT NULL,
+    fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (geo, query, page)
+  )`);
+  // People Apollo found in a search but could not match when looked up, so they are not looked up again.
+  await db.query(`CREATE TABLE IF NOT EXISTS apollo_misses (apollo_person_id TEXT PRIMARY KEY, at TIMESTAMPTZ NOT NULL DEFAULT now())`);
   ready.add(db);
 }
 

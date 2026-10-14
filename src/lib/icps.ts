@@ -2,9 +2,9 @@ import { EUROPE } from './markets';
 import { firmSize, matchTitle, type LeadCheck } from './targeting';
 
 /**
- * The five ideal customer profiles leads are found for (from 15 Oct 2026). Each is one Apollo People Search per region:
- * people with one of these titles and seniorities, at companies Apollo tags with one of these keywords, of this size, based
- * in these countries. Every run is split equally between them. Africa keeps the earlier size-and-industry title rules
+ * The five ideal customer profiles leads are found for (from 15 Oct 2026). Each is searched per region in two steps:
+ * Apollo's company search for companies tagged with one of these keywords, of this size, in these countries; then People
+ * Search for people there with one of these titles and seniorities. Every run is split equally between them. Africa keeps the earlier size-and-industry title rules
  * (Targeting page) and goes to Humans of Globe only.
  */
 export type Icp = {
@@ -38,7 +38,7 @@ export const ICPS: Icp[] = [
       'IT services', 'IT consulting', 'systems integrator', 'AWS partner', 'Oracle partner', 'NetSuite partner', 'HubSpot partner', 'Salesforce partner',
       'SAP partner', 'Microsoft partner', 'IBM partner', 'Odoo partner', 'Siemens partner', 'Databricks partner',
     ],
-    titles: ['Founder', 'CEO', 'Managing Director', 'Partner', 'Chief Executive'],
+    titles: ['Founder', 'CEO', 'Managing Director', 'Partner', 'Chief Executive', 'Owner'],
     seniorities: [...OWNER_FOUNDER_CSUITE, 'partner'],
     employees: [11, 200],
     countries: [US, UK, GERMANY, UAE, SAUDI],
@@ -49,7 +49,7 @@ export const ICPS: Icp[] = [
     id: 'cyber',
     label: 'Cybersecurity companies',
     keywords: ['cybersecurity', 'information security', 'network security', 'cloud security'],
-    titles: ['Founder', 'CEO', 'CISO', 'CTO'],
+    titles: ['Founder', 'CEO', 'CISO', 'CTO', 'Owner'],
     seniorities: OWNER_FOUNDER_CSUITE,
     employees: [11, 200],
     countries: [US, UK, GERMANY, UAE],
@@ -60,7 +60,7 @@ export const ICPS: Icp[] = [
     id: 'ai',
     label: 'AI companies',
     keywords: ['artificial intelligence', 'generative AI', 'machine learning', 'data science'],
-    titles: ['Founder', 'CEO', 'CTO', 'Chief AI Officer'],
+    titles: ['Founder', 'CEO', 'CTO', 'Chief AI Officer', 'Owner'],
     seniorities: OWNER_FOUNDER_CSUITE,
     employees: [11, 200],
     countries: [US, ...EUROPE, UAE],
@@ -71,7 +71,7 @@ export const ICPS: Icp[] = [
     id: 'health',
     label: 'HealthTech and life sciences',
     keywords: ['healthtech', 'digital health', 'medical devices', 'biotech', 'pharmaceuticals', 'hospital'],
-    titles: ['Founder', 'CEO', 'Chief Medical Officer', 'Chief Innovation Officer'],
+    titles: ['Founder', 'CEO', 'Chief Medical Officer', 'Chief Innovation Officer', 'Owner'],
     seniorities: OWNER_FOUNDER_CSUITE,
     employees: [11, 500],
     countries: [US, ...EUROPE, UAE],
@@ -82,7 +82,7 @@ export const ICPS: Icp[] = [
     id: 'fintech',
     label: 'Banking and fintech technology',
     keywords: ['fintech', 'banking technology', 'payments', 'financial software'],
-    titles: ['Founder', 'CEO', 'CTO', 'Chief Product Officer'],
+    titles: ['Founder', 'CEO', 'CTO', 'Chief Product Officer', 'Owner'],
     seniorities: OWNER_FOUNDER_CSUITE,
     employees: [11, 500],
     countries: [US, UK, GERMANY, SINGAPORE, UAE],

@@ -2,8 +2,8 @@ import { BRANDS, type Brand } from './brands';
 
 /**
  * The Cover Story invitation, the same for every brand (Humans of Globe, Gulf Icons, CIO Minds) with the brand's own name
- * and website: congratulations on a recent achievement, a shortlisting for the Cover Story Profile in a special edition
- * named for the person's field, what the profile includes, and a reply-to-hear-more close.
+ * and website, kept short: congratulations on a recent achievement, a shortlisting for the Cover Story Profile in a
+ * special edition named for the person's field and its readership, what the feature includes, and a reply-to-hear-more close.
  *
  * A/B test: version A shows the featuring fee, version B does not, to see whether showing the price affects spam
  * placement and replies. Both versions are pasted into the same Apollo step as Test A and Test B; Apollo splits the
@@ -78,21 +78,17 @@ export function roleFor(title: string, company: string): string {
 /** The parts that change per person, as they go into the custom fields (or into a preview). */
 export type EmailParts = { firstName: string; opener: string; role: string; edition: string };
 type Bold = { bold: true; text: string };
-type Block = string | Bold | { list: string[] } | { lines: string[] };
+/** A link: in HTML a clickable link, in plain text its text (mail apps turn a bare domain into a link). */
+type Link = { href: string; text: string };
+type Line = string | Link;
+type Block = string | Bold | { list: string[] } | { lines: Line[] };
 
-const INCLUDES = (brand: Brand) => [
-  'A ten-page professionally written editorial feature highlighting your leadership journey, business vision, and organizational achievements',
-  'Your portrait featured as the cover face of the edition',
-  'Global digital circulation of the magazine',
-  'Print-ready PDF with reprint and promotional rights',
-  'Five complimentary printed copies',
-  'Official edition logos and a Digital Certificate of Honor',
-  'Backlink to your official website',
-  'Six press releases distributed throughout the year',
-  'One complimentary thought-leadership article in a future edition',
-  'Back cover advertisement',
-  `Banner and sidebar advertisements on the ${BRANDS[brand].label} website`,
-  'Promotional campaigns across LinkedIn, Facebook, and Instagram',
+export const READERSHIP = 'We reach 620,000+ readers all over the world.';
+
+const INCLUDES = [
+  'A cover story and a full write-up on you and your company, from a short 35-minute interview',
+  'Published in our digital and print edition, with your approval on the draft before it goes out',
+  '5 full-page ad placements and 3 CXO Standpoint articles to use across the year',
 ];
 
 /** The email as blocks, so the plain-text and HTML versions always say exactly the same thing. */
@@ -101,27 +97,26 @@ function blocks(brand: Brand, variant: Variant, p: EmailParts, senderName: strin
   return [
     `Dear ${greetingName},`,
     { bold: true, text: p.opener },
-    `Your recent achievement in ${p.role} reflects your leadership and the impact you are creating in your field. At ${name}, we take pride in recognizing individuals who are shaping their industries, and your journey caught the attention of our editorial team.`,
-    `We are pleased to share that you have been shortlisted for a Cover Story Profile in our upcoming special edition, "${p.edition}".`,
-    'This edition will spotlight influential leaders who are driving innovation, shaping industry trends, and creating meaningful business impact. We would be honoured to feature your leadership journey, professional milestones, and vision for the future for our global audience of C-suite executives, investors, and industry decision-makers.',
-    { bold: true, text: 'The Cover Story Profile may include:' },
-    { list: INCLUDES(brand) },
+    `In recognition of ${p.role}, our editorial team at ${name} has shortlisted you for a Cover Story Profile in our upcoming special edition, "${p.edition}". ${READERSHIP}`,
+    { bold: true, text: 'The feature includes:' },
+    { list: INCLUDES },
     ...(variant === 'A' ? [{ bold: true, text: FEE_LINE } as Bold] : []),
-    'We believe your story would make a valuable addition to this edition and provide an opportunity to showcase your achievements to a wider professional audience.',
-    'Would you be interested in exploring this Cover Story opportunity? If so, simply reply to this email, and I would be happy to share the detailed feature proposal, participation options, and associated fees for your consideration.',
-    'We look forward to hearing from you.',
-    { lines: ['Warm regards,', senderName, SENDER.designation, name, `Office: ${SENDER.office}`, `WhatsApp: ${SENDER.whatsapp}`, `Website: ${BRANDS[brand].domain}`] },
+    'We believe your story would be a great fit for this edition. Would you like to explore it? Simply reply to this email and I will share the full proposal.',
+    { lines: ['Warm regards,', senderName, SENDER.designation, name, `Office: ${SENDER.office}`, `WhatsApp: ${SENDER.whatsapp}`, { href: `https://${BRANDS[brand].domain}`, text: BRANDS[brand].domain }] },
   ];
 }
 
+const lineText = (l: Line) => (typeof l === 'string' ? l : l.text);
+
 function toText(list: Block[]): string {
   return list
-    .map((b) => (typeof b === 'string' ? b : 'bold' in b ? b.text : 'list' in b ? b.list.map((i) => `•  ${i}`).join('\n') : b.lines.join('\n')))
+    .map((b) => (typeof b === 'string' ? b : 'bold' in b ? b.text : 'list' in b ? b.list.map((i) => `•  ${i}`).join('\n') : b.lines.map(lineText).join('\n')))
     .join('\n\n');
 }
 
 const escapeHtml = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const P = 'margin:0 0 14px;';
+const lineHtml = (l: Line) => (typeof l === 'string' ? escapeHtml(l) : `<a href="${escapeHtml(l.href)}" target="_blank" style="color:#1a5fb4;text-decoration:underline;">${escapeHtml(l.text)}</a>`);
 
 function toHtml(list: Block[]): string {
   return list
@@ -129,7 +124,7 @@ function toHtml(list: Block[]): string {
       if (typeof b === 'string') return `<p style="${P}">${escapeHtml(b)}</p>`;
       if ('bold' in b) return `<p style="${P}"><strong>${escapeHtml(b.text)}</strong></p>`;
       if ('list' in b) return `<ul style="margin:0 0 14px;padding-left:20px;">\n${b.list.map((i) => `<li style="margin:0 0 4px;">${escapeHtml(i)}</li>`).join('\n')}\n</ul>`;
-      return `<p style="${P}">${b.lines.map(escapeHtml).join('<br>')}</p>`;
+      return `<p style="${P}">${b.lines.map(lineHtml).join('<br>')}</p>`;
     })
     .join('\n');
 }
