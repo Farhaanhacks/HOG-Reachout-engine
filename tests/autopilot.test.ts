@@ -1,6 +1,6 @@
 import { PGlite } from '@electric-sql/pglite';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { setAutopilot, tick } from '../src/lib/autopilot';
+import { getAutopilot, isNewLeadDay, setAutopilot, tick } from '../src/lib/autopilot';
 import type { Services } from '../src/lib/services';
 import { saveSettings } from '../src/lib/settings';
 import type { Db } from '../src/lib/store';
@@ -22,14 +22,15 @@ const FIELDS = ['HOG Subject', 'HOG Opener', 'HOG Role', 'HOG Edition', 'HOG Ind
 /** Every outside service the autopilot touches: Apollo (search, lookups, contacts, sequences), Serper news and DeepSeek. */
 function fakeWorld() {
   const added: { inbox: string; ids: string[] }[] = [];
-  const country = (id: string) => ({ g: 'United Arab Emirates', u: 'United States', e: 'Germany' })[id[0]] ?? 'Nigeria';
+  const country = (id: string) => ({ g: 'United Arab Emirates', u: 'United States', e: 'Germany', s: 'Singapore' })[id[0]] ?? 'Nigeria';
   const f = (async (url: string, init: RequestInit = {}) => {
     const u = new URL(url);
     const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
     if (u.pathname.endsWith('/mixed_people/api_search')) {
       const where = u.searchParams.getAll('person_locations[]');
-      const prefix = where.includes('United Arab Emirates') ? 'g' : where.includes('United States') ? 'u' : where.includes('Germany') ? 'e' : 'a';
-      const page = u.searchParams.get('page');
+      const prefix = where.includes('United Arab Emirates') ? 'g' : where.includes('United States') ? 'u' : where.includes('Germany') ? 'e' : where.includes('Singapore') ? 's' : 'a';
+      // Each search (ICP keywords, or Africa's titles) and page has its own people.
+      const page = `${u.searchParams.get('page')}${(u.searchParams.get('q_organization_keyword_tags[]') ?? u.searchParams.getAll('person_titles[]').join('')).replace(/\W/g, '')}`;
       return json({ people: Array.from({ length: 50 }, (_, i) => ({ id: `${prefix}${page}-${i}`, first_name: 'X', title: 'CEO', organization: { name: `${prefix}${page}co${i}` }, has_email: true })) });
     }
     if (u.pathname.endsWith('/people/bulk_match')) {
@@ -73,7 +74,7 @@ describe('autopilot', () => {
 
   it("finds the hour's leads, writes their emails and sends each brand with a sequence, over as many ticks as it takes", async () => {
     const { svc, added } = fakeWorld();
-    await setAutopilot(db, { enabled: true, perHour: 10 });
+    await setAutopilot(db, { enabled: true, perHour: 10, alternate: false });
     await saveSettings(db, { sequences: { hog: 'seq-hog' } }); // only Humans of Globe has a sequence so far
     let last = await tick(svc, db, { budgetMs: 60_000 });
     for (let i = 0; i < 10 && last.phase !== 'done'; i++) last = await tick(svc, db, { budgetMs: 60_000 });
@@ -93,9 +94,26 @@ describe('autopilot', () => {
   });
 
   it('never lets two scheduler calls work at once', async () => {
-    await setAutopilot(db, { enabled: true });
+    await setAutopilot(db, { enabled: true, alternate: false });
     await tick(fakeWorld().svc, db, { budgetMs: 1 }); // creates the tables
     await db.query("INSERT INTO locks (name, until) VALUES ('autopilot', now() + interval '1 minute') ON CONFLICT (name) DO UPDATE SET until = EXCLUDED.until");
     expect(await tick(fakeWorld().svc, db)).toMatchObject({ ran: false, reason: 'Another tick is still working' });
+  });
+
+  it('on alternate days works every other day and leaves the days between to the follow-ups', async () => {
+    const ap = { alternate: true, firstDay: '2026-10-14' };
+    expect(isNewLeadDay(ap, new Date('2026-10-14T23:59:00Z'))).toBe(true);
+    expect(isNewLeadDay(ap, new Date('2026-10-15T00:00:00Z'))).toBe(false);
+    expect(isNewLeadDay(ap, new Date('2026-10-16T12:00:00Z'))).toBe(true);
+    expect(isNewLeadDay(ap, new Date('2026-10-13T12:00:00Z'))).toBe(false);
+    expect(isNewLeadDay({ ...ap, alternate: false }, new Date('2026-10-15T12:00:00Z'))).toBe(true);
+
+    await setAutopilot(db, { enabled: true });
+    expect(await getAutopilot(db)).toMatchObject({ alternate: true, firstDay: '2026-10-14' }); // the default
+    const { svc, added } = fakeWorld();
+    const res = await tick(svc, db, { now: new Date('2026-10-15T09:00:00Z') });
+    expect(res).toMatchObject({ ran: false, reason: expect.stringContaining('Follow-up day') });
+    expect(await db.query('SELECT 1 FROM runs')).toHaveLength(0);
+    expect(added).toHaveLength(0);
   });
 });

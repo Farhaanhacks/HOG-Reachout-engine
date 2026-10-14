@@ -1,10 +1,10 @@
 import { geoShort } from './geo';
 
 /**
- * The markets leads come from: the GCC, Europe, the US and Africa. Each market is a list of countries, searched
- * together in Apollo by where the person is based. Which brand a lead goes to depends on their market (see brands.ts).
+ * The markets leads come from: the GCC, Europe, the US, Singapore and Africa. Each market is a list of countries. Which
+ * brand a lead goes to depends on their market (see brands.ts); which countries are searched depends on the ICPs (icps.ts).
  */
-export type Market = 'gcc' | 'eu' | 'us' | 'af';
+export type Market = 'gcc' | 'eu' | 'us' | 'sg' | 'af';
 
 /** The six Gulf Cooperation Council countries. */
 export const GCC = ['United Arab Emirates', 'Saudi Arabia', 'Qatar', 'Kuwait', 'Bahrain', 'Oman'];
@@ -29,17 +29,11 @@ export const MARKETS: Record<Market, { label: string; short: string; countries: 
   gcc: { label: 'GCC', short: 'GCC', countries: GCC },
   eu: { label: 'Europe', short: 'Europe', countries: EUROPE },
   us: { label: 'United States', short: 'US', countries: ['United States'] },
+  sg: { label: 'Singapore', short: 'Singapore', countries: ['Singapore'] },
   af: { label: 'Africa', short: 'Africa', countries: AFRICA },
 };
 
 export const MARKET_LIST = Object.keys(MARKETS) as Market[];
-
-/**
- * The order searches take turns in. The GCC gets the most turns (Gulf Icons, 40% of every run, only has the GCC), then
- * Europe and the US (CIO Minds), then Africa (Humans of Globe alone). A run skips any market whose brands already have
- * all the leads they need.
- */
-export const MARKET_TURNS: Market[] = ['gcc', 'eu', 'gcc', 'us', 'gcc', 'eu', 'af', 'us'];
 
 export function isMarket(value: string): value is Market {
   return Object.prototype.hasOwnProperty.call(MARKETS, value);
@@ -74,7 +68,7 @@ const GL: Record<string, string> = {
   finland: 'fi', poland: 'pl', greece: 'gr', romania: 'ro', 'czech republic': 'cz', hungary: 'hu', ukraine: 'ua', nigeria: 'ng',
   'south africa': 'za', kenya: 'ke', egypt: 'eg', ghana: 'gh', morocco: 'ma', tanzania: 'tz', uganda: 'ug', ethiopia: 'et', rwanda: 'rw',
   senegal: 'sn', tunisia: 'tn', algeria: 'dz', zambia: 'zm', zimbabwe: 'zw', botswana: 'bw', namibia: 'na', mauritius: 'mu', cameroon: 'cm',
-  'saudi arabia': 'sa', qatar: 'qa', kuwait: 'kw', bahrain: 'bh', oman: 'om', jordan: 'jo', lebanon: 'lb', iraq: 'iq', turkey: 'tr', israel: 'il',
+  singapore: 'sg', 'saudi arabia': 'sa', qatar: 'qa', kuwait: 'kw', bahrain: 'bh', oman: 'om', jordan: 'jo', lebanon: 'lb', iraq: 'iq', turkey: 'tr', israel: 'il',
 };
 
 export function glForCountry(country: string | null | undefined): string {

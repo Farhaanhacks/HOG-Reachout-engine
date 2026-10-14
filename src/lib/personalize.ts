@@ -1,4 +1,5 @@
 import { askDeepSeekJson } from './ai';
+import { icpByLabel } from './icps';
 import { isGeo } from './geo';
 import { glForCountry } from './markets';
 import { newsSearch, mapLimit, type NewsResult, type Services } from './services';
@@ -30,7 +31,7 @@ Rules:
 Reply with JSON only: {"achievement": "...", "edition": "...", "fact_used": "the fact you referred to, in a few words"}`;
 }
 
-type Lead = { id: number | string; name: string; title: string; company: string; geo: string; country?: string; industry?: string; snippet: string };
+type Lead = { id: number | string; name: string; title: string; company: string; geo: string; country?: string; industry?: string; segment?: string; snippet: string };
 
 /** Replaces the person's full name and each part of it (3+ letters) with "the person", case-insensitively. */
 export function redactName(text: string, name: string): string {
@@ -52,6 +53,7 @@ export function factsFor(lead: Lead, news: NewsResult[]): string {
     `Company: ${lead.company || 'unknown'}`,
     `Country: ${lead.country || lead.geo.toUpperCase()}`,
     lead.industry ? `Industry: ${lead.industry}` : '',
+    icpByLabel(lead.segment) ? `Edition theme (name the edition in this field): ${icpByLabel(lead.segment)?.label}` : '',
     lead.snippet ? `From their LinkedIn profile: ${redactName(lead.snippet, lead.name).slice(0, 600)}` : '',
     ...news.slice(0, 4).map((n, i) => `News ${i + 1}${n.date ? ` (${n.date})` : ''}${n.source ? `, ${n.source}` : ''}: ${redactName(`${n.title ?? ''}. ${n.snippet ?? ''}`, lead.name).slice(0, 300)}`),
   ];
@@ -96,7 +98,7 @@ export type PersonalizeSummary = { done: number; none: number; failed: number; s
 /** People with an email ready, not yet sent, and not yet personalized (only one run's, if given): main people first. */
 async function waiting(db: Db, limit: number, runId?: number | string): Promise<Lead[]> {
   return db.query<Lead>(
-    `SELECT id, name, title, company, geo, country, industry, snippet FROM people
+    `SELECT id, name, title, company, geo, country, industry, segment, snippet FROM people
      WHERE ${READY_SQL} AND email <> '' AND sequence_status = '' AND opener_status IN ('', 'none') ${runId ? 'AND run_id = $2' : ''}
      ORDER BY COALESCE(rank, 3) ASC, apollo_checked_at ASC NULLS LAST, id ASC LIMIT $1`,
     runId ? [Math.max(1, Math.min(limit, 25)), runId] : [Math.max(1, Math.min(limit, 25))],

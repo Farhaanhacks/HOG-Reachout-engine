@@ -78,6 +78,7 @@ const BELOW = /(deputy|assistant|associate|vice|sub|junior|trainee)[\s-]+$/i;
 const PATTERNS: Record<string, RegExp> = {
   ceo: /\b(ceo|chief executive(?: officer)?)\b/i,
   'chief executive officer': /\b(ceo|chief executive(?: officer)?)\b/i,
+  'chief executive': /\b(ceo|chief executive(?: officer)?)\b/i,
   founder: /\b(co-?founder|founder|founding (?:partner|director|ceo|member))\b/i,
   'co-founder': /\b(co-?founder|founder)\b/i,
   owner: /\b(owner|co-?owner|proprietor)\b/i,
@@ -87,6 +88,14 @@ const PATTERNS: Record<string, RegExp> = {
   'managing partner': /\bmanaging partner\b/i,
   'chief medical officer': /\b(chief medical officer|chief medical|cmo)\b/i,
   'general manager': /\b(general manager|gm)\b/i,
+  // A partner of the firm, never a "Partner Manager" or "Channel Partner Director" (job titles at partner companies).
+  partner:
+    /(?<!\b(?:channel|alliance|alliances|technology|strategic|business|solutions?|implementation|cloud)\s)\bpartner\b(?!\s*(?:manager|management|success|account|alliance|channel|relations|marketing|sales|program|enablement|development|executive|director|lead|specialist|ecosystem|network|engineer|consultant|operations))/i,
+  cto: /\b(cto|chief technology officer|chief technical officer)\b/i,
+  ciso: /\b(ciso|chief information security officer|chief security officer)\b/i,
+  'chief ai officer': /\b(caio|chief ai officer|chief artificial intelligence officer)\b/i,
+  'chief innovation officer': /\bchief innovation officer\b/i,
+  'chief product officer': /\b(cpo|chief product officer)\b/i,
 };
 
 function patternFor(title: string): RegExp {
@@ -107,6 +116,8 @@ export function matchTitle(rawTitle: string | null | undefined, wanted: string[]
       if (BELOW.test(t.slice(0, m.index))) continue;
       // "CMO" at a healthcare company is its Chief Medical Officer, never its Chief Marketing Officer.
       if (w.toLowerCase() === 'chief medical officer' && /marketing/i.test(t)) continue;
+      // "CPO" is also the Chief People or Procurement Officer.
+      if (w.toLowerCase() === 'chief product officer' && /people|procurement|purchasing|privacy/i.test(t)) continue;
       return w;
     }
   }

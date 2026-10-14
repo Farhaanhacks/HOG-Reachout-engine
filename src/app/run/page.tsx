@@ -38,8 +38,13 @@ type Setup = {
 /** Test sizes for now; the full day comes back later as a scheduled run. */
 const TARGETS = [10, 20, 50];
 
-const need = (quotas: Quotas, ready: Partial<Quotas>) => Object.fromEntries(BRAND_LIST.map((b) => [b, Math.max(0, quotas[b] - (ready[b] ?? 0))])) as Quotas;
 const split = (q: Quotas) => BRAND_LIST.map((b) => `${q[b]} ${BRANDS[b].label}`).join(' · ');
+/** A brand's leads by region in a run: "GCC 3/3 · US 2/2 · Europe 2/2 · Africa 1/2" (found / wanted). */
+const byRegion = (run: Pick<Run, 'brief' | 'region_ready'>, b: Brand) =>
+  Object.entries(run.brief.regions ?? {})
+    .filter(([k]) => k.startsWith(`${b}:`))
+    .map(([k, n]) => `${marketShort(k.slice(b.length + 1))} ${run.region_ready?.[k] ?? 0}/${n}`)
+    .join(' · ');
 
 export default function RunWorkflowPage() {
   const [target, setTarget] = useState(20);
@@ -77,8 +82,9 @@ export default function RunWorkflowPage() {
     return () => clearInterval(t);
   }, [loadSetup, loadHistory, loadAuto]);
 
-  async function setAutopilot(change: { enabled?: boolean; perHour?: number }) {
-    if (change.enabled && !window.confirm(`Switch the autopilot on? Every hour, around the clock, it finds ${auto?.autopilot.perHour ?? 30} leads and sends them through Apollo with nobody watching. Each hour uses about as many Apollo credits as leads.`)) return;
+  async function setAutopilot(change: { enabled?: boolean; perHour?: number; alternate?: boolean; today?: 'new' | 'followup' }) {
+    const days = auto?.autopilot.alternate ? 'on every other day (the days between are left to the follow-ups)' : 'every day';
+    if (change.enabled && !window.confirm(`Switch the autopilot on? Every hour, around the clock, ${days}, it finds ${auto?.autopilot.perHour ?? 30} leads and sends them through Apollo with nobody watching. Each hour uses about as many Apollo credits as leads.`)) return;
     try {
       setAuto(await api('/api/autopilot', post(change)));
     } catch (e) {
@@ -122,13 +128,14 @@ export default function RunWorkflowPage() {
       r = (await api<{ run: Run }>('/api/runs', post({ target }))).run;
       setRun(r);
       say(`Finding ${target} leads: ${split(r.brief.quotas ?? quotas)}.`);
-      while (r.status === 'running' && r.next_index < r.queries.length && Object.values(need(r.brief.quotas ?? quotas, r.brand_ready)).some((n) => n > 0)) {
+      // `left` is worked out by the server: what each magazine still needs in each region, within each ICP's share.
+      while (r.status === 'running' && r.next_index < r.queries.length && r.left > 0) {
         if (stop.current) throw new Error('Stopped. Everyone found so far is saved and waits on the Outreach page.');
         const q = r.queries[r.next_index];
         const d: { run: Run; summary: StepSummary } = await api(`/api/runs/${r.id}/step`, post());
         r = d.run;
         setRun(r);
-        if (d.summary.searched) say(`${marketShort(q.market)} · ${q.label}: ${d.summary.searched} found, ${d.summary.lookedUp} looked up, ${d.summary.ready} ready to email`);
+        if (d.summary.searched) say(`${q.lane && q.lane !== 'africa' ? q.label : `${marketShort(q.market)} · ${q.label}`}: ${d.summary.searched} found, ${d.summary.lookedUp} looked up, ${d.summary.ready} ready to email`);
         if (d.summary.stopped) {
           say(d.summary.stopped);
           break;
@@ -198,7 +205,7 @@ export default function RunWorkflowPage() {
         <div>
           <h1>Run workflow</h1>
           <p className="sub">
-            One click finds the leads (split 40% Gulf Icons, 30% Humans of Globe, 30% CIO Minds), gets their LinkedIn, website and verified email from Apollo, writes each email from the news, and sends each brand&apos;s leads into its own sequence from its own inboxes.
+            One click finds the leads (split 35% Gulf Icons, 30% Humans of Globe, 35% CIO Minds; each magazine&apos;s share split equally between its regions; and equally between the five ICPs on the <Link href="/targeting">Targeting</Link> page), gets their LinkedIn, website and verified email from Apollo, writes each email from the news, and sends each brand&apos;s leads into its own sequence from its own inboxes.
           </p>
         </div>
       </div>
@@ -264,10 +271,10 @@ export default function RunWorkflowPage() {
       <section className="card">
         <div className="card-head">
           <h2>Autopilot</h2>
-          {auto && (auto.autopilot.enabled ? <span className="badge ok">On · {auto.autopilot.perHour} leads every hour, 24/7</span> : <span className="badge">Off</span>)}
+          {auto && (auto.autopilot.enabled ? <span className="badge ok">On · {auto.newLeadDay ? `${auto.autopilot.perHour} leads every hour today` : 'follow-up day, no new leads today'}</span> : <span className="badge">Off</span>)}
         </div>
         <p className="muted small">
-          Runs the whole workflow every hour, around the clock, with nobody watching: finds the leads (split 40/30/30), writes the emails and sends each brand&apos;s leads into its sequence. Leads an inbox has no room for today go out later on their own. It needs an outside scheduler to call the site every 2 minutes (below).
+          Runs the whole workflow every hour, around the clock, with nobody watching: finds the leads (split 35/30/35 between the brands and equally between the five ICPs), writes the emails and sends each brand&apos;s leads into its sequence. Leads an inbox has no room for today go out later on their own. It needs an outside scheduler to call the site every 2 minutes (below).
         </p>
         <div className="row">
           <label className="check">
@@ -288,6 +295,27 @@ export default function RunWorkflowPage() {
             <button className="primary" onClick={() => setAutopilot({ enabled: true })} disabled={!auto?.secretSet || blockers.length > 0}>Switch autopilot on</button>
           )}
         </div>
+        <div className="row">
+          <label className="check">
+            <input type="checkbox" checked={auto?.autopilot.alternate ?? true} onChange={(e) => setAutopilot({ alternate: e.target.checked })} />
+            Alternate days: new leads one day, only Apollo&apos;s follow-ups the next
+          </label>
+        </div>
+        {auto?.autopilot.alternate && (
+          <div className="row">
+            <span className="small">
+              Today is a <b>{auto.newLeadDay ? 'new-leads day' : 'follow-up day'}</b>. It switches at {new Date(auto.dayEndsAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} your time.
+            </span>
+            <button onClick={() => setAutopilot({ today: auto.newLeadDay ? 'followup' : 'new' })}>Make today a {auto.newLeadDay ? 'follow-up' : 'new-leads'} day</button>
+          </div>
+        )}
+        {auto && (
+          <p className="muted small">
+            {auto.autopilot.perHour} an hour is about {auto.autopilot.perHour * 24} new leads per {auto.autopilot.alternate ? 'new-leads day' : 'day'}.
+            {auto.autopilot.perHour * 24 > Math.min(auto.caps.lookups, auto.caps.sends) &&
+              ` The daily caps stop it sooner: ${auto.caps.lookups} Apollo lookups (APOLLO_DAILY_LIMIT) and ${auto.caps.sends} people sent (OUTREACH_DAILY_LIMIT), both set in Vercel.`}
+          </p>
+        )}
         {auto && !auto.secretSet && <p className="warn-note">Add <code>CRON_SECRET</code> in Vercel (a long random string, at least 16 characters), redeploy, then set up the scheduler below.</p>}
         {auto && (
           <div className="stats">
@@ -318,13 +346,14 @@ export default function RunWorkflowPage() {
           </div>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Brand</th><th className="num">Wanted</th><th className="num">Found, ready to email</th><th className="num">Sent to sequence</th></tr></thead>
+              <thead><tr><th>Brand</th><th className="num">Wanted</th><th className="num">Found, ready to email</th><th>By region (found / wanted)</th><th className="num">Sent to sequence</th></tr></thead>
               <tbody>
                 {BRAND_LIST.map((b) => (
                   <tr key={b}>
                     <td><b>{BRANDS[b].label}</b></td>
                     <td className="num">{runQuotas[b]}</td>
                     <td className="num">{run.brand_ready[b] ?? 0}</td>
+                    <td className="small">{byRegion(run, b) || '—'}</td>
                     <td className="num">{sent[b] ?? 0}</td>
                   </tr>
                 ))}
@@ -351,7 +380,7 @@ export default function RunWorkflowPage() {
                     <td className="small">{h.auto ? <span className="badge accent">Autopilot</span> : 'Button'}</td>
                     <td className="small">{countryName(h.geo)}</td>
                     <td className="num">{h.apollo_with_email}{h.brief.target ? `/${h.brief.target}` : ''}</td>
-                    {BRAND_LIST.map((b) => <td key={b} className="num">{h.brand_ready[b] ?? '—'}</td>)}
+                    {BRAND_LIST.map((b) => <td key={b} className="num" title={byRegion(h, b)}>{h.brand_ready[b] ?? '—'}</td>)}
                     <td className="num">{h.apollo_credits}</td>
                     <td><RunBadge status={h.status} error={h.error} /></td>
                   </tr>

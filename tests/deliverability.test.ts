@@ -2,6 +2,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { allocate, autoPause, checkDomain, emailsToday, guessSenderName, mailboxStates, newPeopleToday, pauseReason, senderNameOf, updateMailbox, type MailboxState } from '../src/lib/deliverability';
 import type { Services } from '../src/lib/services';
+import { saveSettings } from '../src/lib/settings';
 import { savePeople, type Db } from '../src/lib/store';
 import { importSuppression, suppressedReason, suppressionStatus } from '../src/lib/suppression';
 import { breakdown, replies, syncMessages, totals } from '../src/lib/tracking';
@@ -52,8 +53,26 @@ describe('warm-up and rotation', () => {
     expect(pauseReason({ ...health, sent: 100, bounced: 2, bounceRate: 0.02 })).toBe('');
   });
 
+  it('pauses nothing while auto-pause is off (the default)', async () => {
+    await mailboxStates(db, 3); // creates the tables
+    await db.query("INSERT INTO mailboxes (id, email) VALUES ('a1', 'ava@one.com'), ('a2', 'ben@one.com')");
+    await db.query("UPDATE mailboxes SET paused_reason = '4% bounced' WHERE id = 'a2'"); // paused before it was switched off
+    for (let i = 0; i < 30; i++) await db.query('INSERT INTO messages (id, email_account_id, completed_at, happened_at, bounced) VALUES ($1, $2, now(), now(), $3)', [`m${i}`, 'a1', i < 10]);
+    expect(await autoPause(db, 3)).toEqual([]);
+    expect((await mailboxStates(db, 3)).every((s) => s.usable && !s.paused_reason)).toBe(true);
+  });
+
+  it('switching auto-pause off lifts the pauses it made', async () => {
+    await mailboxStates(db, 3);
+    await db.query("INSERT INTO mailboxes (id, email, paused_reason) VALUES ('a1', 'ava@one.com', '5% bounced')");
+    await saveSettings(db, { autoPause: true });
+    await saveSettings(db, { autoPause: false });
+    expect((await mailboxStates(db, 3))[0]).toMatchObject({ paused_reason: '', usable: true });
+  });
+
   it('pauses a domain whose inboxes are all bouncing, and lets the team resume', async () => {
     await mailboxStates(db, 3); // creates the tables
+    await saveSettings(db, { autoPause: true });
     await db.query("INSERT INTO mailboxes (id, email) VALUES ('a1', 'ava@one.com'), ('a2', 'ben@one.com'), ('b1', 'dan@two.com')");
     const msg = (id: string, account: string, bounced: boolean) =>
       db.query('INSERT INTO messages (id, email_account_id, completed_at, happened_at, bounced) VALUES ($1, $2, now(), now(), $3)', [id, account, bounced]);

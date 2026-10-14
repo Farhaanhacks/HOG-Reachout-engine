@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { BRANDS, eligibleBrands } from '../../lib/brands';
 import { api, post } from '../../lib/client';
+import { AFRICA_SHARE, ICPS } from '../../lib/icps';
 import type { Settings } from '../../lib/settings';
 import { SECTORS, SECTOR_LABEL, SMALL_MAX_EMPLOYEES, type Edition, type TitleRules } from '../../lib/targeting';
 
@@ -65,7 +67,7 @@ export default function TargetingPage() {
       <div className="page-head">
         <div>
           <h1>Targeting</h1>
-          <p className="sub">Which title to target depends on the company&apos;s size and industry: each lead&apos;s industry and employee count are read from Apollo and the title is picked from these rules. Small firms are up to {SMALL_MAX_EMPLOYEES} employees.</p>
+          <p className="sub">Leads are found for five ideal customer profiles (ICPs), shared equally in every run. Africa keeps the size-and-industry title rules below and goes to Humans of Globe only.</p>
         </div>
       </div>
 
@@ -74,13 +76,48 @@ export default function TargetingPage() {
 
       <section className="card">
         <div className="card-head">
-          <h2>Title rules</h2>
+          <h2>Ideal customer profiles</h2>
+          <span className="badge">Each about {Math.round(100 / ICPS.length)}% of every run</span>
+        </div>
+        <p className="muted small">
+          Each is an Apollo People Search: people with one of the titles and seniorities, at companies Apollo tags with one of the keywords, of that size, based in
+          those countries. Only verified emails. A lead goes to one brand for good: Gulf Icons (Gulf), CIO Minds (US, Europe, Singapore) or Humans of Globe (Gulf, US, Europe).
+        </p>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>ICP</th><th>Company keywords</th><th>Titles</th><th>Seniority</th><th>Employees</th><th>Countries</th><th>Brands</th><th>Edition</th></tr></thead>
+            <tbody>
+              {ICPS.map((icp) => {
+                const europe = icp.countries.length > 10;
+                const brands = [...new Set(icp.countries.flatMap((c) => eligibleBrands(c)))].map((b) => BRANDS[b].label);
+                return (
+                  <tr key={icp.id}>
+                    <td><b>{icp.label}</b></td>
+                    <td className="small">{icp.keywords.join(', ')}</td>
+                    <td className="small">{icp.titles.join(', ')}</td>
+                    <td className="small">{icp.seniorities.map((s) => (s === 'c_suite' ? 'C-suite' : s[0].toUpperCase() + s.slice(1))).join(', ')}</td>
+                    <td className="small">{icp.employees[0]}–{icp.employees[1]}</td>
+                    <td className="small">{europe ? icp.countries.filter((c) => ['United States', 'United Arab Emirates', 'Saudi Arabia', 'Singapore'].includes(c)).concat('all of Europe').join(', ') : icp.countries.join(', ')}</td>
+                    <td className="small">{brands.join(', ')}</td>
+                    <td className="small">{icp.edition.replace('{year}', String(new Date().getFullYear()))}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="faint small">&quot;Partner&quot; means a partner of the firm, never a Partner Manager or Channel Partner Director. The edition is used when the news research names none for the company.</p>
+      </section>
+
+      <section className="card">
+        <div className="card-head">
+          <h2>Africa: title rules (Humans of Globe only)</h2>
           <div className="row">
             <button onClick={() => save({ reset: 'rules' }, 'Default title rules')} disabled={busy || !settings}>Back to defaults</button>
             <button className="primary" onClick={() => latest.current.rules && save({ rules: latest.current.rules }, 'Title rules')} disabled={busy || !rules}>Save title rules</button>
           </div>
         </div>
-        <p className="muted small">Comma-separated. &quot;CEO&quot; also matches &quot;Chief Executive Officer&quot;, &quot;Founder&quot; matches &quot;Co-Founder &amp; CEO&quot;; deputies, assistants and former holders never match.</p>
+        <p className="muted small">Used only for Africa, about {Math.round(AFRICA_SHARE * 100)}% of every run on top of the ICPs. Small firms are up to {SMALL_MAX_EMPLOYEES} employees. Comma-separated. &quot;CEO&quot; also matches &quot;Chief Executive Officer&quot;, &quot;Founder&quot; matches &quot;Co-Founder &amp; CEO&quot;; deputies, assistants and former holders never match.</p>
         {rules && (
           <div className="table-wrap">
             <table>

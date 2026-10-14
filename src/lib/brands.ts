@@ -5,10 +5,10 @@ import type { Db } from './store';
  * The three brands leads are found for. Each sends from its own domain and covers its own countries:
  *  - Humans of Globe (humansofglobe.com): the GCC, the US, Europe and Africa.
  *  - Gulf Icons (gulficons.com): the six GCC countries.
- *  - CIO Minds (ciominds.com): the US and Europe.
+ *  - CIO Minds (ciominds.com): the US, Europe and Singapore.
  * Every lead belongs to exactly one brand, for good, so nobody is contacted by two of them.
  *
- * Each run is split 40% Gulf Icons, 30% Humans of Globe, 30% CIO Minds (BRAND_SHARE): a run of 20 aims for 8, 6 and 6
+ * Each run is split 35% Gulf Icons, 30% Humans of Globe, 35% CIO Minds (BRAND_SHARE): a run of 20 aims for 7, 6 and 7
  * leads ready to email. A lead several brands could take (a GCC lead: Humans of Globe or Gulf Icons; a US or European
  * one: Humans of Globe or CIO Minds) goes to whichever of them still needs the most in the run; outside a run, to
  * whichever is furthest below its share of that overlap.
@@ -18,21 +18,21 @@ export type Brand = 'hog' | 'gulficons' | 'ciominds';
 export const BRANDS: Record<Brand, { label: string; domain: string; regions: Market[]; regionLabel: string }> = {
   hog: { label: 'Humans of Globe', domain: 'humansofglobe.com', regions: ['gcc', 'us', 'eu', 'af'], regionLabel: 'GCC, US, Europe, Africa' },
   gulficons: { label: 'Gulf Icons', domain: 'gulficons.com', regions: ['gcc'], regionLabel: 'GCC' },
-  ciominds: { label: 'CIO Minds', domain: 'ciominds.com', regions: ['us', 'eu'], regionLabel: 'US, Europe' },
+  ciominds: { label: 'CIO Minds', domain: 'ciominds.com', regions: ['us', 'eu', 'sg'], regionLabel: 'US, Europe, Singapore' },
 };
 
 export const BRAND_LIST = Object.keys(BRANDS) as Brand[];
 
 /** Each brand's share of every run. */
-export const BRAND_SHARE: Record<Brand, number> = { gulficons: 0.4, hog: 0.3, ciominds: 0.3 };
+export const BRAND_SHARE: Record<Brand, number> = { gulficons: 0.35, hog: 0.3, ciominds: 0.35 };
 
 export type Quotas = Record<Brand, number>;
 
-/** How many leads ready to email each brand gets in a run of `target`: 20 gives Gulf Icons 8, Humans of Globe 6, CIO Minds 6. */
+/** How many leads ready to email each brand gets in a run of `target`: 20 gives Gulf Icons 7, Humans of Globe 6, CIO Minds 7. */
 export function quotasFor(target: number): Quotas {
   const gulficons = Math.round(target * BRAND_SHARE.gulficons);
-  const ciominds = Math.round(target * BRAND_SHARE.ciominds);
-  return { gulficons, ciominds, hog: Math.max(0, target - gulficons - ciominds) };
+  const hog = Math.min(target - gulficons, Math.round(target * BRAND_SHARE.hog));
+  return { gulficons, ciominds: Math.max(0, target - gulficons - hog), hog };
 }
 
 /** Which brands a market's leads can go to (GCC: Humans of Globe or Gulf Icons…). */

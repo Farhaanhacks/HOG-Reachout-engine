@@ -3,6 +3,7 @@ import { companyKey, emailDomain, entriesFor, linkedinKey, normDomain } from '..
 import { DEFAULT_RULES, checkLead, cleanRules, editionFor, editionTitle, firmSize, matchTitle, sectorOf } from '../src/lib/targeting';
 import { brandOfEmail, eligibleBrands, quotasFor } from '../src/lib/brands';
 import { glForCountry, marketOf } from '../src/lib/markets';
+import { ICPS, checkIcpLead, laneCaps } from '../src/lib/icps';
 
 describe('matchTitle', () => {
   it('reads how titles are really written', () => {
@@ -13,6 +14,26 @@ describe('matchTitle', () => {
     expect(matchTitle('Chairwoman of the Board', ['Chairman'])).toBe('Chairman');
     expect(matchTitle('GM - Hilton Lagos', ['General Manager'])).toBe('General Manager');
     expect(matchTitle('CMO | Chief Medical Officer', ['Chief Medical Officer'])).toBe('Chief Medical Officer');
+  });
+
+  it('reads the ICP titles, and a Partner only when they are a partner of the firm', () => {
+    expect(matchTitle('Managing Partner', ['Partner'])).toBe('Partner');
+    expect(matchTitle('Founding Partner & CEO', ['Partner'])).toBe('Partner');
+    expect(matchTitle('Partner', ['Partner'])).toBe('Partner');
+    expect(matchTitle('Partner Manager, EMEA', ['Partner'])).toBe('');
+    expect(matchTitle('Channel Partner Director', ['Partner'])).toBe('');
+    expect(matchTitle('Head of Partnerships', ['Partner'])).toBe('');
+    expect(matchTitle('Alliance Partner Lead', ['Partner'])).toBe('');
+    expect(matchTitle('Co-founder & CTO', ['CTO'])).toBe('CTO');
+    expect(matchTitle('Chief Technology Officer', ['CTO'])).toBe('CTO');
+    expect(matchTitle('Deputy CTO', ['CTO'])).toBe('');
+    expect(matchTitle('CISO', ['CISO'])).toBe('CISO');
+    expect(matchTitle('Chief Information Security Officer', ['CISO'])).toBe('CISO');
+    expect(matchTitle('Chief AI Officer', ['Chief AI Officer'])).toBe('Chief AI Officer');
+    expect(matchTitle('Chief Innovation Officer', ['Chief Innovation Officer'])).toBe('Chief Innovation Officer');
+    expect(matchTitle('CPO', ['Chief Product Officer'])).toBe('Chief Product Officer');
+    expect(matchTitle('CPO - Chief People Officer', ['Chief Product Officer'])).toBe('');
+    expect(matchTitle('Chief Executive', ['Chief Executive'])).toBe('Chief Executive');
   });
 
   it('never matches a step below, a former holder, or the wrong CMO', () => {
@@ -94,14 +115,21 @@ describe('brands', () => {
     expect(eligibleBrands('Germany')).toEqual(['hog', 'ciominds']);
     expect(eligibleBrands('Nigeria')).toEqual(['hog']);
     expect(eligibleBrands('Egypt')).toEqual(['hog']); // Africa
+    expect(eligibleBrands('Singapore')).toEqual(['ciominds']);
     expect(eligibleBrands('Jordan')).toEqual([]); // outside the GCC: no brand
     expect(eligibleBrands('Japan')).toEqual([]);
   });
 
-  it('splits every run 40% Gulf Icons, 30% Humans of Globe, 30% CIO Minds', () => {
+  it('splits every run 35% Gulf Icons, 30% Humans of Globe, 35% CIO Minds', () => {
     expect(quotasFor(10)).toEqual({ gulficons: 4, ciominds: 3, hog: 3 });
-    expect(quotasFor(20)).toEqual({ gulficons: 8, ciominds: 6, hog: 6 });
-    expect(quotasFor(50)).toEqual({ gulficons: 20, ciominds: 15, hog: 15 });
+    expect(quotasFor(20)).toEqual({ gulficons: 7, ciominds: 7, hog: 6 });
+    expect(quotasFor(30)).toEqual({ gulficons: 11, ciominds: 10, hog: 9 });
+    expect(quotasFor(50)).toEqual({ gulficons: 18, ciominds: 17, hog: 15 });
+    for (let t = 1; t <= 200; t++) {
+      const q = quotasFor(t);
+      expect(q.gulficons + q.hog + q.ciominds).toBe(t);
+      expect(Math.min(q.gulficons, q.hog, q.ciominds)).toBeGreaterThanOrEqual(0);
+    }
   });
 
   it('knows which brand an inbox sends for', () => {
@@ -132,5 +160,23 @@ describe('suppression keys', () => {
       { kind: 'company', value: 'acme' },
     ]);
     expect(entriesFor({ company: 'AB' }, 'client')).toEqual([]); // too short to block safely
+  });
+});
+
+describe('ICPs', () => {
+  const cyber = ICPS.find((i) => i.id === 'cyber')!;
+  it('fits a lead on the ICP title, company size and country', () => {
+    expect(checkIcpLead(cyber, { title: 'Founder & CISO', employees: 40, country: 'Germany' })).toMatchObject({ fit: true, matched: 'Founder' });
+    expect(checkIcpLead(cyber, { title: 'CEO', employees: 5, country: 'Germany' })).toMatchObject({ fit: false, reason: expect.stringContaining('outside 11–200') });
+    expect(checkIcpLead(cyber, { title: 'CEO', employees: 900, country: 'Germany' }).fit).toBe(false);
+    expect(checkIcpLead(cyber, { title: 'CEO', employees: 40, country: 'France' })).toMatchObject({ fit: false, reason: expect.stringContaining('outside the countries') });
+    expect(checkIcpLead(cyber, { title: 'Sales Director', employees: 40, country: 'Germany' }).fit).toBe(false);
+    expect(checkIcpLead(cyber, { title: 'CEO', employees: null, country: 'United States' }).fit).toBe(true); // size unknown: kept
+  });
+
+  it('shares every run equally between the five ICPs, with a tenth for Africa', () => {
+    expect(laneCaps(30)).toEqual({ channel: 6, cyber: 6, ai: 6, health: 6, fintech: 6, africa: 3 });
+    expect(laneCaps(10)).toEqual({ channel: 2, cyber: 2, ai: 2, health: 2, fintech: 2, africa: 1 });
+    expect(ICPS.map((i) => i.id)).toEqual(['channel', 'cyber', 'ai', 'health', 'fintech']);
   });
 });

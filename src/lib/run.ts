@@ -1,16 +1,18 @@
 import { bulkMatch, type ApolloMatch } from './apollo';
-import { MAX_PAGE, PER_PAGE, searchPeople, searchesFor, type SearchSpec } from './apollo-search';
+import { MAX_PAGE, PER_PAGE, icpSearches, searchPeople, searchesFor, type SearchSpec } from './apollo-search';
 import { DEFAULT_DAILY_LIMIT, enrichStatus, runEnrichment, statusOf, type EnrichSummary } from './enrich';
 import { companyKey, emailDomain, linkedinKey, normDomain } from './keys';
-import { BRAND_LIST, brandsForMarket, eligibleBrands, pickBrand, quotasFor, type Brand, type Quotas } from './brands';
-import { MARKET_LIST, MARKET_TURNS, isMarket, marketOf, type Market } from './markets';
+import { BRAND_LIST, brandsForMarket, eligibleBrands, isBrand, pickBrand, quotasFor, type Quotas } from './brands';
+import { AFRICA_LANE, ICPS, checkIcpLead, icpById, laneCaps, type Icp } from './icps';
+import { MARKET_LIST, isMarket, marketOf, type Market } from './markets';
+import { cellKey, needIn, needs, regionQuotas, type Needs } from './quotas';
 import { tagTitle } from './seniority';
 import { getSettings, type Settings } from './settings';
 import { sizeVerdict } from './size';
 import { clientCompanies, suppressedReason } from './suppression';
 import type { Services } from './services';
 import { ensureSchema, type Db } from './store';
-import { checkLead, editionFor, matchTitle } from './targeting';
+import { checkLead, editionFor, matchTitle, sectorOf } from './targeting';
 
 /** The most searches one run plans. Each search reads one page of 50 people. */
 export const MAX_STEPS = 200;
@@ -38,6 +40,8 @@ type RunRow = {
   status: 'running' | 'done' | 'stopped';
   error: string;
   brand_ready?: string | null;
+  lane_ready?: string | null;
+  region_ready?: string | null;
   /** Started by the autopilot (the hourly scheduler) rather than the Run workflow button. */
   auto?: boolean;
   /** Autopilot stage: finding, writing, sending (then the run is done). */
@@ -45,7 +49,15 @@ type RunRow = {
 };
 
 /** What a run is asked for: these markets, until this many new leads can be emailed, split between the brands. */
-export type RunBrief = { markets: string[]; target: number; quotas?: Quotas };
+export type RunBrief = {
+  markets: string[];
+  target: number;
+  quotas?: Quotas;
+  /** The most leads each lane (ICP, or Africa) may take. Older runs have none. */
+  lanes?: Record<string, number>;
+  /** Each brand's quota split equally between its regions ("hog:us": 3). Older runs have none. */
+  regions?: Record<string, number>;
+};
 /** One search of a run: a page of one Apollo search. */
 export type RunQuery = SearchSpec & { page: number };
 
@@ -58,23 +70,48 @@ export type RunQuery = SearchSpec & { page: number };
  * results: people the searches returned. found: those with a wanted title. excluded: skipped before paying (already
  * saved, client company, or the wrong title). inserted / updated: leads saved. apollo_with_email: new leads ready to email.
  */
-export type Run = Omit<RunRow, 'brief' | 'queries' | 'apollo_credits' | 'brand_ready'> & {
+export type Run = Omit<RunRow, 'brief' | 'queries' | 'apollo_credits' | 'brand_ready' | 'lane_ready' | 'region_ready'> & {
   brief: RunBrief;
   queries: RunQuery[];
   apollo_credits: number;
   /** New leads ready to email found so far, per brand. */
   brand_ready: Partial<Quotas>;
+  /** New leads ready to email found so far, per lane (ICP id, or 'africa'). */
+  lane_ready: Record<string, number>;
+  /** New leads ready to email found so far, per brand and region ("hog:us"). */
+  region_ready: Record<string, number>;
+  /** How many more leads the run can still find; 0 when it has all it needs or nothing left to search. */
+  left: number;
 };
 
-/** What each brand still needs in a run (never below 0). */
+type NeedSource = Pick<Run, 'brief' | 'brand_ready' | 'lane_ready' | 'region_ready' | 'queries' | 'next_index'>;
+
+/** What each brand still needs in a run (never below 0), by brand only: how runs from before the region split work. */
 export function remainingNeed(run: Pick<Run, 'brief' | 'brand_ready'>): Quotas {
   const quotas = run.brief.quotas ?? quotasFor(run.brief.target);
   return Object.fromEntries(BRAND_LIST.map((b) => [b, Math.max(0, quotas[b] - (run.brand_ready[b] ?? 0))])) as Quotas;
 }
 
-/** Whether every brand has all the leads it needs. */
-export function quotasMet(run: Pick<Run, 'brief' | 'brand_ready'>): boolean {
-  return BRAND_LIST.every((b) => remainingNeed(run)[b] === 0);
+/** What a run split by region still needs, counting the searches from `from` on; null for older runs. */
+export function runNeeds(run: NeedSource, from = run.next_index): Needs | null {
+  if (!run.brief.regions) return null;
+  return needs({
+    regions: run.brief.regions,
+    regionReady: run.region_ready,
+    lanes: run.brief.lanes,
+    laneReady: run.lane_ready,
+    remaining: run.queries.slice(from).filter((q) => q.titles.length),
+  });
+}
+
+function leftOf(run: NeedSource): number {
+  const n = runNeeds(run);
+  return n ? n.left : Object.values(remainingNeed(run)).reduce((a, b) => a + b, 0);
+}
+
+/** Whether the run has found all it needs (or, split by region, all its remaining searches can still give it). */
+export function quotasMet(run: NeedSource): boolean {
+  return leftOf(run) === 0;
 }
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(n) || lo));
@@ -84,6 +121,7 @@ function toRun(r: RunRow): Run {
   const brief = JSON.parse(r.brief) as Partial<RunBrief> & { geos?: string[] };
   const queries = (JSON.parse(r.queries) as Partial<RunQuery & { query: string; geo: string; segment: string; startPage: number }>[]).map(
     (q): RunQuery => ({
+      ...q,
       key: q.key ?? q.query ?? '',
       market: (q.market ?? q.geo ?? 'us') as Market,
       label: q.label ?? q.segment ?? 'Search',
@@ -94,22 +132,30 @@ function toRun(r: RunRow): Run {
       page: q.page ?? q.startPage ?? 1,
     }),
   );
-  let brandReady: Partial<Quotas> = {};
-  try {
-    brandReady = JSON.parse(r.brand_ready || '{}') as Partial<Quotas>;
-  } catch {}
-  return {
+  const parse = <T,>(s: string | null | undefined): T => {
+    try {
+      return JSON.parse(s || '{}') as T;
+    } catch {
+      return {} as T;
+    }
+  };
+  const run: Run = {
     ...r,
-    brief: { markets: brief.markets ?? brief.geos ?? r.geo.split(','), target: brief.target ?? 0, quotas: brief.quotas },
+    brief: { markets: brief.markets ?? brief.geos ?? r.geo.split(','), target: brief.target ?? 0, quotas: brief.quotas, lanes: brief.lanes, regions: brief.regions },
     queries,
     apollo_credits: Number(r.apollo_credits) || 0,
-    brand_ready: brandReady,
+    brand_ready: parse<Partial<Quotas>>(r.brand_ready),
+    lane_ready: parse<Record<string, number>>(r.lane_ready),
+    region_ready: parse<Record<string, number>>(r.region_ready),
+    left: 0,
   };
+  run.left = run.status === 'running' && queries[0]?.titles.length ? leftOf(run) : 0;
+  return run;
 }
 
 /**
- * Starts a run. Searches take turns by market (Africa and Europe twice as often as the US and the UAE) and, within a
- * market, by search; each search continues from the page earlier runs stopped at, so every run finds new people.
+ * Starts a run. Searches take turns by lane (each of the five ICPs, then Africa) and, within a lane, by region; each
+ * search continues from the page earlier runs stopped at, so every run finds new people.
  */
 export async function createRun(db: Db, brief: { markets?: string[]; target?: number } = {}, opts: { maxSteps?: number; auto?: boolean } = {}): Promise<Run> {
   const markets = [...new Set(brief.markets ?? MARKET_LIST)].filter(isMarket);
@@ -122,22 +168,27 @@ export async function createRun(db: Db, brief: { markets?: string[]; target?: nu
   for (const h of await db.query<{ geo: string; query: string; pages_done: number; exhausted: boolean }>('SELECT geo, query, pages_done, exhausted FROM searched_queries')) {
     history.set(`${h.geo}|${h.query}`, { pages: h.pages_done, exhausted: h.exhausted });
   }
-  // Per market: its searches still to read, each with the next page to read.
-  const open = new Map<Market, { spec: SearchSpec; next: number }[]>();
-  for (const m of markets) {
+  // Per lane: its searches still to read (in the run's markets), each with the next page to read.
+  const lanes: [string, SearchSpec[]][] = [
+    ...ICPS.map((icp): [string, SearchSpec[]] => [icp.id, icpSearches(icp)]),
+    [AFRICA_LANE, searchesFor('af', settings.rules)],
+  ];
+  const open = new Map<string, { spec: SearchSpec; next: number }[]>();
+  for (const [lane, specs] of lanes) {
     open.set(
-      m,
-      searchesFor(m, settings.rules)
-        .map((spec) => ({ spec, h: history.get(`${m}|${spec.key}`) ?? { pages: 0, exhausted: false } }))
+      lane,
+      specs
+        .filter((spec) => markets.includes(spec.market))
+        .map((spec) => ({ spec, h: history.get(`${spec.market}|${spec.key}`) ?? { pages: 0, exhausted: false } }))
         .filter((x) => !x.h.exhausted && x.h.pages < MAX_PAGE)
         .map((x) => ({ spec: x.spec, next: x.h.pages + 1 })),
     );
   }
-  const turns = MARKET_TURNS.filter((m) => markets.includes(m));
-  const pointer = new Map<Market, number>();
-  // Searches are free, so a run plans plenty of them; what it pays for is capped by the target (see runStep).
-  // Searches whose brands are already full are skipped for free, so plenty are planned.
-  const maxSteps = clamp(opts.maxSteps ?? Math.max(16, Math.ceil(target / 3)), 1, MAX_STEPS);
+  const turns = lanes.map(([lane]) => lane);
+  const pointer = new Map<string, number>();
+  // Searches are free, and those whose brands or lane are already full are skipped for free, so plenty are planned;
+  // what a run pays for is capped by the target (see runStep).
+  const maxSteps = clamp(opts.maxSteps ?? Math.max(40, target), 1, MAX_STEPS);
   const queries: RunQuery[] = [];
   for (let t = 0; queries.length < maxSteps && [...open.values()].some((l) => l.length); t++) {
     const m = turns[t % turns.length];
@@ -151,10 +202,13 @@ export async function createRun(db: Db, brief: { markets?: string[]; target?: nu
     if (item.next > MAX_PAGE) list.splice(i, 1);
   }
   if (!queries.length) throw new Error('Every search has been read to the end. Add titles on the Targeting page to find new people.');
+  const quotas = quotasFor(target);
+  // Rotates which regions get a brand's odd extra lead from run to run.
+  const [count] = await db.query<{ n: number }>('SELECT count(*)::int AS n FROM runs');
 
   const [row] = await db.query<RunRow>('INSERT INTO runs (geo, brief, queries, pages, auto, phase) VALUES ($1, $2, $3, 1, $4, $5) RETURNING *', [
     markets.join(','),
-    JSON.stringify({ markets, target, quotas: quotasFor(target) } satisfies RunBrief),
+    JSON.stringify({ markets, target, quotas, lanes: laneCaps(target), regions: regionQuotas(quotas, markets, Number(count?.n) || 0) } satisfies RunBrief),
     JSON.stringify(queries),
     !!opts.auto,
     opts.auto ? 'finding' : '',
@@ -180,13 +234,16 @@ export async function saveApolloLead(
   fallbackMarket: Market,
   settings: Settings,
   source: string,
-  run: { id?: number | string; need?: Partial<Quotas> } = {},
+  run: { id?: number | string; need?: Partial<Quotas>; icp?: Icp } = {},
 ): Promise<{ inserted: boolean; ready: boolean; brand: string }> {
-  const rule = checkLead({ title: m.title, industry: m.industry, employees: m.org?.employees ?? null }, settings.rules);
+  // A lead found for an ICP is checked against that ICP; anyone else (Africa, older searches) against the title rules.
+  const rule = run.icp
+    ? { ...checkIcpLead(run.icp, { title: m.title, employees: m.org?.employees ?? null, country: m.country }), sector: sectorOf(m.industry, settings.rules) }
+    : checkLead({ title: m.title, industry: m.industry, employees: m.org?.employees ?? null }, settings.rules);
   // Someone based outside every brand's countries is saved but never emailed.
   const covered = eligibleBrands(m.country).length > 0;
   const check = covered ? rule : { ...rule, fit: false, reason: `Based in ${m.country || 'an unknown country'}, outside every brand's countries` };
-  const edition = editionFor(m.industry, settings.editions);
+  const segment = run.icp?.label ?? editionFor(m.industry, settings.editions).segment;
   const linkedin = linkedinKey(m.linkedin) || null;
   const domain = normDomain(m.domain || m.website) || emailDomain(m.email);
   const suppressed = await suppressedReason(db, { email: m.email, domain, linkedin: linkedin ?? '', company: m.company });
@@ -196,7 +253,7 @@ export async function saveApolloLead(
   const values = [
     m.id, linkedin, m.name, m.title, m.company, [m.city, m.country].filter(Boolean).join(', '), marketOf(m.country) ?? fallbackMarket,
     tag.labels.join(', '), tag.isTarget, tag.rank, m.email, emailStatus, status, m.confidence, m.org?.employees ?? null, sizeVerdict(m.org),
-    m.website, domain, m.industry, m.country, check.sector, check.size, edition.segment, check.matched, check.fit, check.reason, suppressed,
+    m.website, domain, m.industry, m.country, check.sector, check.size, segment, check.matched, check.fit, check.reason, suppressed,
     companyKey(m.company), linkedin ?? '', source,
   ];
   const [existing] = await db.query<{ id: number | string; brand: string }>(
@@ -252,17 +309,28 @@ export async function runStep(svc: Services, db: Db, id: number | string, opts: 
   if (run.status !== 'running' || run.next_index >= run.queries.length) return { run, summary };
   if (!run.queries[run.next_index].titles.length) throw new Error('This run is from the earlier LinkedIn search and cannot be continued. Start a new run.');
   if (quotasMet(run)) return { run, summary };
-  // Skip, for free, searches in markets whose brands already have all the leads they need.
+  // How many more this search may bring: what its region still needs across the brands that cover it (by brand and
+  // region, and within its lane's cap), or for older runs what the region's brands still need.
   const need = remainingNeed(run);
   const marketNeed = (m: Market) => brandsForMarket(m).reduce((n, b) => n + need[b], 0);
+  const searchNeedAt = (i: number): { n: number; needs: Needs | null } => {
+    const q = run.queries[i];
+    const needs = runNeeds(run, i);
+    if (!needs) return { n: marketNeed(q.market), needs };
+    const inRegion = Object.values(needIn(needs.cells, q.market)).reduce((a, b) => a + (b ?? 0), 0);
+    const inLane = needs.lanes && q.lane ? (needs.lanes[q.lane] ?? 0) : Infinity;
+    return { n: Math.min(inRegion, inLane), needs };
+  };
+  // Skip, for free, searches whose region or lane already has all the leads it needs.
   let index = run.next_index;
-  while (index < run.queries.length && run.queries[index].titles.length && marketNeed(run.queries[index].market) === 0) index++;
+  while (index < run.queries.length && run.queries[index].titles.length && searchNeedAt(index).n === 0) index++;
   if (index !== run.next_index) {
     await db.query('UPDATE runs SET next_index = $2 WHERE id = $1 AND next_index = $3', [id, index, run.next_index]);
     run.next_index = index;
     if (index >= run.queries.length) return { run: (await getRun(db, id)) as Run, summary };
   }
   const q = run.queries[index];
+  const { n: searchNeed, needs: current } = searchNeedAt(index);
   const dailyLimit = opts.dailyLimit ?? DEFAULT_DAILY_LIMIT;
   const room = dailyLimit - (await enrichStatus(db, dailyLimit)).usedToday;
   if (room <= 0) {
@@ -300,8 +368,8 @@ export async function runStep(svc: Services, db: Db, id: number | string, opts: 
   );
   const clients = await clientCompanies(db, wanted.map((p) => p.company));
   const fresh = wanted.filter((p) => !saved.has(p.id) && !clients.has(companyKey(p.company)));
-  // Never pay for more people than this market's brands still need: a run of 10 looks up about 10, not a whole page.
-  const toLookUp = fresh.slice(0, Math.min(room, run.brief.target ? marketNeed(q.market) : room));
+  // Never pay for more people than this search may still bring: a run of 10 looks up about 10, not a whole page.
+  const toLookUp = fresh.slice(0, Math.min(room, run.brief.target ? searchNeed : room));
   summary.skipped = found.people.length - toLookUp.length;
 
   let matches: (ApolloMatch | null)[] = [];
@@ -323,17 +391,25 @@ export async function runStep(svc: Services, db: Db, id: number | string, opts: 
   for (let i = 0; i < matches.length; i++) {
     const m = matches[i];
     if (!m) continue;
+    // The lead's brand goes to whichever brand covering their region still needs the most there.
+    const region = marketOf(m.country) ?? q.market;
+    const brandNeed = current ? needIn(current.cells, region) : need;
     // Bulk match by id answers for that person; keep the id even if Apollo leaves it out of the answer.
-    const r = await saveApolloLead(db, { ...m, id: m.id || toLookUp[i].id }, q.market, settings, q.label, { id, need });
+    const r = await saveApolloLead(db, { ...m, id: m.id || toLookUp[i].id }, q.market, settings, q.label, { id, need: brandNeed, icp: icpById(q.lane) });
     if (r.inserted) inserted++;
     else updated++;
     if (m.email) withEmail++;
-    if (r.ready && r.inserted) {
+    if (r.ready && r.inserted && isBrand(r.brand)) {
       summary.ready++;
-      const b = r.brand as Brand;
-      if (b in need) {
-        need[b] = Math.max(0, need[b] - 1);
-        run.brand_ready[b] = (run.brand_ready[b] ?? 0) + 1;
+      const b = r.brand;
+      need[b] = Math.max(0, need[b] - 1);
+      run.brand_ready[b] = (run.brand_ready[b] ?? 0) + 1;
+      const cell = cellKey(b, region);
+      run.region_ready[cell] = (run.region_ready[cell] ?? 0) + 1;
+      if (current && cell in current.cells) current.cells[cell] = Math.max(0, current.cells[cell] - 1);
+      if (q.lane) {
+        run.lane_ready[q.lane] = (run.lane_ready[q.lane] ?? 0) + 1;
+        if (current?.lanes && q.lane in current.lanes) current.lanes[q.lane] = Math.max(0, current.lanes[q.lane] - 1);
       }
     }
   }
@@ -351,7 +427,7 @@ export async function runStep(svc: Services, db: Db, id: number | string, opts: 
   const [row] = await db.query<RunRow>(
     `UPDATE runs SET next_index = next_index + $3, searches = searches + 1, results = results + $4, found = found + $5, excluded = excluded + $6,
        inserted = inserted + $7, updated = updated + $8, apollo_requested = apollo_requested + $9, apollo_with_email = apollo_with_email + $10,
-       apollo_credits = apollo_credits + $11, error = $12, brand_ready = $13
+       apollo_credits = apollo_credits + $11, error = $12, brand_ready = $13, lane_ready = $14, region_ready = $15
      WHERE id = $1 AND next_index = $2 RETURNING *`,
     [
       id,
@@ -367,6 +443,8 @@ export async function runStep(svc: Services, db: Db, id: number | string, opts: 
       summary.credits,
       summary.stopped ?? '',
       JSON.stringify(run.brand_ready),
+      JSON.stringify(run.lane_ready),
+      JSON.stringify(run.region_ready),
     ],
   );
   // No row means another tab advanced the run meanwhile; the people saved here are deduplicated anyway.

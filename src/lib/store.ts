@@ -195,6 +195,7 @@ export async function ensureSchema(db: Db): Promise<void> {
   )`);
   // New leads ready to email per brand in each run ({"gulficons":8,…}), and which run found each lead.
   await db.query(`ALTER TABLE runs ADD COLUMN IF NOT EXISTS brand_ready TEXT NOT NULL DEFAULT '{}'`);
+  await db.query(`ALTER TABLE runs ADD COLUMN IF NOT EXISTS lane_ready TEXT NOT NULL DEFAULT '{}', ADD COLUMN IF NOT EXISTS region_ready TEXT NOT NULL DEFAULT '{}'`);
   // Autopilot runs (started by the scheduler) and the stage each is at: finding, writing, sending.
   await db.query(`ALTER TABLE runs ADD COLUMN IF NOT EXISTS auto BOOLEAN NOT NULL DEFAULT FALSE, ADD COLUMN IF NOT EXISTS phase TEXT NOT NULL DEFAULT ''`);
   // Short-lived locks, so two scheduler calls never work on the same run at once.

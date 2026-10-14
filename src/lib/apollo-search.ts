@@ -1,4 +1,5 @@
-import { MARKETS, type Market } from './markets';
+import { AFRICA_LANE, type Icp } from './icps';
+import { MARKETS, marketOf, type Market } from './markets';
 import { getJson, type Services } from './services';
 import { SECTORS, SECTOR_LABEL, type Sector, type TitleRules } from './targeting';
 
@@ -20,7 +21,7 @@ export const LARGE_RANGE = '51,1000000';
 
 /** One search in a market: these titles, at companies of this size, optionally narrowed by a keyword. */
 export type SearchSpec = {
-  /** Stable name for the search, used to remember how deep it has been read. Changes when its titles change. */
+  /** Stable name for the search, used to remember how deep it has been read. Changes when its filters change. */
   key: string;
   market: Market;
   label: string;
@@ -28,6 +29,14 @@ export type SearchSpec = {
   titles: string[];
   ranges: string[];
   keywords?: string;
+  /** Which share of the run it fills: an ICP's id, or 'africa'. Older runs have none. */
+  lane?: string;
+  /** The countries searched, when only some of the market's (an ICP's UK and Germany, say). */
+  locations?: string[];
+  /** Apollo company keyword tags ("cybersecurity", "AWS partner"); a company with any of them matches. */
+  companyKeywords?: string[];
+  /** Apollo seniorities (owner, founder, c_suite, partner). */
+  seniorities?: string[];
 };
 
 export type FoundPerson = { id: string; firstName: string; title: string; company: string; hasEmail: boolean };
@@ -48,8 +57,10 @@ export function searchUrl(spec: SearchSpec, page: number): string {
   return `${URL_BASE}?${query({
     'person_titles': spec.titles,
     include_similar_titles: true,
-    'person_locations': MARKETS[spec.market].countries,
+    'person_seniorities': spec.seniorities,
+    'person_locations': spec.locations?.length ? spec.locations : MARKETS[spec.market].countries,
     'organization_num_employees_ranges': spec.ranges,
+    'q_organization_keyword_tags': spec.companyKeywords,
     'contact_email_status': ['verified'],
     q_keywords: spec.keywords,
     page,
@@ -93,7 +104,7 @@ export function searchesFor(market: Market, rules: TitleRules): SearchSpec[] {
   const add = (sector: Sector, size: string, titles: string[], ranges: string[], keywords?: string) => {
     if (!titles.length) return;
     const label = `${SECTOR_LABEL[sector] === 'All other industries' ? 'All industries' : SECTOR_LABEL[sector]}: ${size}${keywords ? ` (${keywords})` : ''}`;
-    out.push({ key: `${sector}|${size}|${titles.map(short).join(',')}|${keywords ?? ''}`, market, label, sector, titles, ranges, keywords });
+    out.push({ key: `${sector}|${size}|${titles.map(short).join(',')}|${keywords ?? ''}`, market, label, sector, titles, ranges, keywords, lane: AFRICA_LANE });
   };
   add('general', 'small firms', rules.general.small, [SMALL_RANGE]);
   add('general', 'large firms', rules.general.large, [LARGE_RANGE]);
@@ -107,4 +118,29 @@ export function searchesFor(market: Market, rules: TitleRules): SearchSpec[] {
     else add(sector, 'own titles', own, [SMALL_RANGE, LARGE_RANGE]);
   }
   return out;
+}
+
+/**
+ * An ICP's searches: one per region its countries fall in (the US; the UK and Germany; the UAE and Saudi Arabia…), so a
+ * run can skip a region whose brands already have all the leads they need.
+ */
+export function icpSearches(icp: Icp): SearchSpec[] {
+  const byMarket = new Map<Market, string[]>();
+  for (const c of icp.countries) {
+    const m = marketOf(c);
+    if (m) byMarket.set(m, [...(byMarket.get(m) ?? []), c]);
+  }
+  const range = `${icp.employees[0]},${icp.employees[1]}`;
+  return [...byMarket].map(([market, locations]) => ({
+    key: `icp|${icp.id}|${range}|${icp.titles.map(short).join(',')}|${icp.seniorities.join(',')}|${icp.keywords.map(short).join(',')}|${locations.length}`,
+    market,
+    label: `${icp.label}: ${MARKETS[market].short}`,
+    sector: 'general' as const,
+    titles: icp.titles,
+    ranges: [range],
+    lane: icp.id,
+    locations,
+    companyKeywords: icp.keywords,
+    seniorities: icp.seniorities,
+  }));
 }

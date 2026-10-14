@@ -8,6 +8,7 @@ import { MARKETS, MARKET_LIST } from '../../lib/markets';
 import { draftEmail } from '../../lib/pitch';
 import type { Settings } from '../../lib/settings';
 import type { SavedPerson } from '../../lib/store';
+import { icpByLabel } from '../../lib/icps';
 import { editionFor, editionTitle, type Edition } from '../../lib/targeting';
 
 /** The website as a link without the https:// in front. */
@@ -125,7 +126,8 @@ export default function LeadsPage() {
             <tbody>
               {people?.map((p) => {
                 const open = openDraft === String(p.id);
-                const e = open ? editionFor(p.industry, editions) : null;
+                const icp = icpByLabel(p.segment);
+                const e = open ? (icp ? { segment: icp.label, keywords: [], edition: icp.edition, industryLine: icp.industryLine } : editionFor(p.industry, editions)) : null;
                 const d = e ? draftEmail({ ...p, edition: p.edition_name || editionTitle(e), brand: isBrand(p.brand) ? p.brand : 'hog' }) : null;
                 return (
                   <Fragment key={String(p.id)}>
@@ -138,7 +140,7 @@ export default function LeadsPage() {
                         <div><Website url={p.company_website} /></div>
                         <div><SizeBadge size={p.company_size} employees={p.company_employees} firmSize={p.firm_size} /></div>
                       </td>
-                      <td className="small">{p.industry || <span className="muted">—</span>}{p.segment ? <div className="faint">{p.segment} edition</div> : null}</td>
+                      <td className="small">{p.industry || <span className="muted">—</span>}{p.segment ? <div className="faint">{icpByLabel(p.segment) ? `ICP: ${p.segment}` : `${p.segment} edition`}</div> : null}</td>
                       <td><CountryBadge geo={p.geo} match={p.geo_match} country={p.country} /></td>
                       <td>
                         {p.email ? <div>{p.email}</div> : null}

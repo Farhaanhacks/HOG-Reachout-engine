@@ -6,6 +6,7 @@ import { draftEmail, fallbackOpenerFor, firstNameOf, roleFor, subjectFor, unsubs
 import { mapLimit, type Services } from './services';
 import { getSettings } from './settings';
 import { PERSON_COLUMNS, READY_SQL, ensureSchema, type Db, type SavedPerson } from './store';
+import { icpByLabel } from './icps';
 import { editionFor, editionTitle, type Edition } from './targeting';
 import { syncIfStale } from './tracking';
 import { TEST_ID, unsubscribeUrl } from './unsubscribe';
@@ -31,11 +32,12 @@ type ContactSource = Pick<SavedPerson, 'id' | 'name' | 'title' | 'company' | 'em
 
 /**
  * The personal parts of a person's email, as they go into Apollo's custom fields: the subject, the congratulations
- * line, their role, the edition they are shortlisted for (from the news research, or the edition table for their
- * industry), the industry line and their unsubscribe link.
+ * line, their role, the edition they are shortlisted for (from the news research, else their ICP's edition, else the
+ * edition table for their industry), the industry line and their unsubscribe link.
  */
 export function emailParts(p: ContactSource, opts: { unsubscribeId?: number | string; editions?: Edition[]; senderName?: string } = {}) {
-  const e = editionFor(p.industry, opts.editions);
+  const icp = icpByLabel(p.segment);
+  const e: Edition = icp ? { segment: icp.label, keywords: [], edition: icp.edition, industryLine: icp.industryLine } : editionFor(p.industry, opts.editions);
   return {
     subject: subjectFor(p.company),
     opener: p.opener?.trim() || fallbackOpenerFor(p.company),
@@ -189,20 +191,21 @@ export async function sendingRoom(db: Db, dailyLimit: number, emailsPerPerson: n
 export async function pushToApollo(
   svc: Services,
   db: Db,
-  opts: { sequenceId: string; limit: number; dailyLimit?: number; brand?: Brand; runId?: number | string },
+  opts: { sequenceId: string; limit: number; dailyLimit?: number; brand?: Brand; runId?: number | string; emailsPerPerson?: number },
 ): Promise<PushSummary> {
   const brand = opts.brand ?? 'hog';
   if (!opts.sequenceId) throw new Error('Choose an Apollo sequence first.');
   const fields = await requireFields(svc);
   const settings = await getSettings(db);
   const dailyLimit = opts.dailyLimit ?? DEFAULT_OUTREACH_DAILY_LIMIT;
+  const perPerson = opts.emailsPerPerson ?? settings.emailsPerPerson;
   const summary: PushSummary = { requested: 0, added: 0, skipped: 0, failed: 0, reasons: {}, byInbox: {}, paused: [] };
 
   await syncMailboxes(svc, db);
   await syncIfStale(svc, db, 30 * 60_000, 15_000).catch(() => null);
-  summary.paused = await autoPause(db, settings.emailsPerPerson);
+  summary.paused = await autoPause(db, perPerson);
 
-  const { room, inboxes } = await sendingRoom(db, dailyLimit, settings.emailsPerPerson, brand);
+  const { room, inboxes } = await sendingRoom(db, dailyLimit, perPerson, brand);
   if (!inboxes.some((s) => s.usable)) {
     return { ...summary, stopped: `No ${BRANDS[brand].label} inbox (@${BRANDS[brand].domain}) can send: connect one in Apollo, or turn one on or resume it on the Deliverability page` };
   }

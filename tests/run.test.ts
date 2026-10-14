@@ -1,6 +1,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { searchesFor } from '../src/lib/apollo-search';
+import { icpSearches, searchesFor } from '../src/lib/apollo-search';
+import { ICPS } from '../src/lib/icps';
 import { toCsv } from '../src/lib/csv';
 import { SEGMENTS, planQueries } from '../src/lib/icp';
 import { createRun, finishRun, getRun, listRuns, runStep } from '../src/lib/run';
@@ -97,13 +98,42 @@ describe('searchesFor', () => {
 });
 
 describe('createRun', () => {
-  it('takes turns by market, the GCC most often, and sizes the run and its brand quotas to the target', async () => {
+  it('takes turns by lane (the five ICPs, then Africa) and sizes the run, its brand, region and lane quotas to the target', async () => {
     const run = await createRun(db, { target: 120 });
-    expect(run.queries).toHaveLength(40); // searches are free; lookups are what the quotas cap
-    expect((await createRun(db, { target: 10 })).queries).toHaveLength(16);
-    expect(run.queries.slice(0, 8).map((q) => q.market)).toEqual(['gcc', 'eu', 'gcc', 'us', 'gcc', 'eu', 'af', 'us']);
+    expect(run.queries).toHaveLength(120); // searches are free; lookups are what the quotas cap
+    expect((await createRun(db, { target: 10 })).queries).toHaveLength(40);
+    expect(run.queries.slice(0, 6).map((q) => q.lane)).toEqual(['channel', 'cyber', 'ai', 'health', 'fintech', 'africa']);
+    // Within a lane its regions take turns: channel partners are searched in the US, then the UK and Germany, then the Gulf.
+    expect(run.queries.filter((q) => q.lane === 'channel').slice(0, 3).map((q) => q.locations)).toEqual([
+      ['United States'],
+      ['United Kingdom', 'Germany'],
+      ['United Arab Emirates', 'Saudi Arabia'],
+    ]);
     expect(run.queries.every((q) => q.page === 1 || run.queries.some((o) => o.key === q.key && o.market === q.market && o.page === q.page - 1))).toBe(true);
-    expect(run.brief).toEqual({ markets: ['gcc', 'eu', 'us', 'af'], target: 120, quotas: { gulficons: 48, ciominds: 36, hog: 36 } });
+    expect(run.brief).toMatchObject({
+      markets: ['gcc', 'eu', 'us', 'sg', 'af'],
+      target: 120,
+      quotas: { gulficons: 42, hog: 36, ciominds: 42 },
+      lanes: { channel: 24, cyber: 24, ai: 24, health: 24, fintech: 24, africa: 12 },
+    });
+    expect(run.brief.regions).toEqual({
+      'gulficons:gcc': 42,
+      'hog:gcc': 9, 'hog:us': 9, 'hog:eu': 9, 'hog:af': 9,
+      'ciominds:us': 14, 'ciominds:eu': 14, 'ciominds:sg': 14,
+    });
+    expect(run.left).toBe(120);
+  });
+
+  it('searches each ICP with its keywords, seniorities, company size and countries', () => {
+    const [us, europe, gulf] = icpSearches(ICPS[0]);
+    expect([us.market, europe.market, gulf.market]).toEqual(['us', 'eu', 'gcc']);
+    expect(gulf).toMatchObject({ lane: 'channel', ranges: ['11,200'], locations: ['United Arab Emirates', 'Saudi Arabia'], titles: ['Founder', 'CEO', 'Managing Director', 'Partner', 'Chief Executive'] });
+    expect(gulf.companyKeywords).toContain('AWS partner');
+    expect(gulf.seniorities).toEqual(['owner', 'founder', 'c_suite', 'partner']);
+    const fintech = icpSearches(ICPS.find((i) => i.id === 'fintech')!);
+    expect(fintech.map((s) => s.market)).toEqual(['us', 'eu', 'sg', 'gcc']);
+    expect(fintech.find((s) => s.market === 'sg')).toMatchObject({ locations: ['Singapore'], ranges: ['11,500'] });
+    expect(icpSearches(ICPS.find((i) => i.id === 'ai')!).find((s) => s.market === 'eu')?.locations).toContain('France');
   });
 
   it('continues each search from the page earlier runs stopped at, and skips searches read to the end', async () => {
@@ -195,26 +225,83 @@ describe('runStep', () => {
     expect(lookups).toHaveLength(1); // the next page returns the same people: all saved already
   });
 
-  it("fills each brand's share of the run (40% Gulf Icons, 30% Humans of Globe, 30% CIO Minds), then stops paying", async () => {
-    // GCC searches return UAE people, US searches return US people; ids change per page so every page is new.
-    const { svc } = fakeApollo((q, page) => {
-      const uae = q.getAll('person_locations[]').includes('United Arab Emirates');
-      return Array.from({ length: 8 }, (_, i) => found(`${uae ? 'u' : 's'}${page}-${i}`, 'CEO'));
-    });
-    const people = new Proxy({} as Record<string, Full>, { get: (_, id: string) => full(id, { country: id.startsWith('u') ? 'United Arab Emirates' : 'United States' }) });
-    const { svc: svc2 } = fakeApollo(() => [], people);
-    // One fetch answers both search and lookups.
-    const both = { ...svc, fetch: (async (url: string, init?: RequestInit) => (url.includes('bulk_match') ? svc2.fetch(url, init) : svc.fetch(url, init))) as typeof fetch };
-    let run = await createRun(db, { markets: ['gcc', 'us'], target: 10 });
-    expect(run.brief.quotas).toEqual({ gulficons: 4, ciominds: 3, hog: 3 });
-    for (let i = 0; i < 6; i++) run = (await runStep(both, db, run.id, { dailyLimit: 600 })).run;
-    expect(run.brand_ready).toEqual({ gulficons: 4, hog: 3, ciominds: 3 });
-    expect(run.apollo_with_email).toBe(10);
-    expect(run.apollo_requested).toBe(10); // GCC: 7 looked up (4 + 3), US: 3; nothing more once every share is full
-    const rows = await db.query<{ apollo_person_id: string; brand: string; run_id: string }>('SELECT apollo_person_id, brand, run_id FROM people');
-    expect(rows.filter((r) => r.apollo_person_id.startsWith('u')).every((r) => ['gulficons', 'hog'].includes(r.brand))).toBe(true);
-    expect(rows.filter((r) => r.apollo_person_id.startsWith('s')).every((r) => r.brand === 'ciominds')).toBe(true);
-    expect(rows.every((r) => String(r.run_id) === String(run.id))).toBe(true);
+  /** A fake Apollo with endless people in every country: each search returns people based in its first country. */
+  function world(opts: { empty?: string[] } = {}) {
+    const lookups: string[][] = [];
+    const searches: URLSearchParams[] = [];
+    const f = (async (url: string, init: RequestInit = {}) => {
+      const u = new URL(url);
+      const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
+      if (u.pathname.endsWith('/mixed_people/api_search')) {
+        searches.push(u.searchParams);
+        const country = u.searchParams.getAll('person_locations[]')[0];
+        if (opts.empty?.includes(country)) return json({ people: [] });
+        const page = u.searchParams.get('page');
+        const tag = u.searchParams.get('q_organization_keyword_tags[]') ?? u.searchParams.getAll('person_titles[]').join('');
+        return json({ people: Array.from({ length: 50 }, (_, i) => found(`${country}|${tag}|${page}|${i}`, 'CEO')) });
+      }
+      if (u.pathname.endsWith('/people/bulk_match')) {
+        const ids = (JSON.parse(String(init.body)) as { details: { id: string }[] }).details.map((d) => d.id);
+        lookups.push(ids);
+        return json({ matches: ids.map((id) => full(id, { country: id.split('|')[0], company: `co ${id}`, email: `${lookups.length}-${ids.indexOf(id)}@x${lookups.length}y${ids.indexOf(id)}.com`, linkedin_url: `http://www.linkedin.com/in/${encodeURIComponent(id)}` })), credits_consumed: ids.length });
+      }
+      return json({ error: `unexpected ${u.pathname}` });
+    }) as unknown as typeof fetch;
+    return { svc: { fetch: f, keys: { serper: '', jina: '', deepseek: '', apollo: 'master-key' } } as Services, lookups, searches };
+  }
+
+  /** Cells without the empty ones, to compare what a run found with what it wanted. */
+  const nonZero = (o: Record<string, number> | undefined) => Object.fromEntries(Object.entries(o ?? {}).filter(([, n]) => n > 0));
+
+  async function runToEnd(svc: Services, target: number, markets?: string[]) {
+    let run = await createRun(db, { target, markets });
+    for (let i = 0; i < 300 && run.status === 'running' && run.left > 0 && run.next_index < run.queries.length; i++) {
+      run = (await runStep(svc, db, run.id, { dailyLimit: 10_000 })).run;
+    }
+    return run;
+  }
+
+  it("splits each magazine's share equally between its regions and the run equally between the ICPs, paying for no more", async () => {
+    const { svc, lookups, searches } = world();
+    const run = await runToEnd(svc, 30);
+    expect(run.left).toBe(0);
+    expect(run.brand_ready).toEqual({ gulficons: 11, hog: 9, ciominds: 10 });
+    expect(nonZero(run.region_ready)).toEqual(nonZero(run.brief.regions)); // Humans of Globe 3/2/2/2, CIO Minds 4/3/3, Gulf Icons 11
+    for (const [lane, cap] of Object.entries(run.brief.lanes ?? {})) expect(run.lane_ready[lane] ?? 0).toBeLessThanOrEqual(cap);
+    expect(Object.values(run.lane_ready).reduce((a, b) => a + b, 0)).toBe(30);
+    expect(lookups.flat()).toHaveLength(30); // every lookup became a lead the run needed
+    // The ICP searches carry the ICP's filters.
+    expect(searches.some((s) => s.getAll('q_organization_keyword_tags[]').includes('cybersecurity') && s.getAll('person_seniorities[]').includes('c_suite'))).toBe(true);
+    const rows = await db.query<{ country: string; brand: string; segment: string }>('SELECT country, brand, segment FROM people');
+    expect(rows.filter((r) => r.country === 'Singapore').every((r) => r.brand === 'ciominds')).toBe(true);
+    expect(rows.filter((r) => r.country === 'United Arab Emirates').every((r) => ['gulficons', 'hog'].includes(r.brand))).toBe(true);
+    expect(rows.filter((r) => r.country === 'Algeria').every((r) => r.brand === 'hog')).toBe(true);
+    expect(rows.filter((r) => r.country === 'Singapore').every((r) => r.segment === 'Banking and fintech technology')).toBe(true);
+  });
+
+  it("keeps regions equal at every run size, and moves a region's share to the brand's other regions when it runs dry", async () => {
+    const clear = () => pg.exec('DELETE FROM people; DELETE FROM runs; DELETE FROM searched_queries; DELETE FROM enrichment_log');
+    for (const target of [10, 20, 50]) {
+      const run = await runToEnd(world().svc, target);
+      expect(nonZero(run.region_ready)).toEqual(nonZero(run.brief.regions));
+      expect(run.left).toBe(0);
+      await clear();
+    }
+    // Singapore has nobody: CIO Minds' Singapore share goes to its US and Europe, equally.
+    const run = await runToEnd(world({ empty: ['Singapore'] }).svc, 30);
+    expect(run.brand_ready).toEqual({ gulficons: 11, hog: 9, ciominds: 10 });
+    const us = run.region_ready['ciominds:us'] ?? 0;
+    const eu = run.region_ready['ciominds:eu'] ?? 0;
+    expect([us + eu, run.region_ready['ciominds:sg'] ?? 0]).toEqual([10, 0]);
+    expect(Math.abs(us - eu)).toBeLessThanOrEqual(1);
+    expect(run.left).toBe(0);
+  });
+
+  it('only searches the regions asked for, and leaves a brand none of them covers out of the run', async () => {
+    const run = await runToEnd(world().svc, 10, ['gcc', 'us']);
+    expect(run.brief.regions).toEqual({ 'gulficons:gcc': 4, 'hog:gcc': 2, 'hog:us': 1, 'ciominds:us': 3 });
+    expect(nonZero(run.region_ready)).toEqual(nonZero(run.brief.regions));
+    expect(run.queries.every((q) => q.market === 'gcc' || q.market === 'us')).toBe(true);
   });
 
   it('never moves a lead to another brand, and gives no brand to someone outside every brand', async () => {
@@ -232,15 +319,18 @@ describe('runStep', () => {
     expect(await db.query('SELECT 1 FROM people')).toHaveLength(2);
   });
 
-  it("looks up no more people than the market's brands still need", async () => {
+  it("looks up no more people than the region's brands and the lane still need", async () => {
     const page = Array.from({ length: 30 }, (_, i) => found(`p${i}`, 'CEO'));
     const people = Object.fromEntries(page.map((p) => [p.id, full(p.id)]));
     const { svc, lookups } = fakeApollo(() => page, people);
-    // Africa is Humans of Globe's alone, and its share of a run of 10 is 3.
+    // Africa is Humans of Globe's alone: its share of a run of 10 is 3. (With only Africa searched, the ICP lanes have no
+    // searches, so their caps pass to the Africa lane.)
     const run = await createRun(db, { markets: ['af'], target: 10 });
     const { run: after } = await runStep(svc, db, run.id, { dailyLimit: 600 });
     expect(lookups.flat()).toHaveLength(3);
     expect(after.brand_ready).toEqual({ hog: 3 });
+    expect(after.lane_ready).toEqual({ africa: 3 });
+    expect(after.left).toBe(0);
   });
 
   it('stops before paying once the daily lookup limit is reached', async () => {

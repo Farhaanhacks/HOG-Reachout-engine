@@ -7,6 +7,7 @@ import { followUpTemplate, followUpTemplateHtml, sequenceTemplate, sequenceTempl
 import type { Services } from '../src/lib/services';
 import { savePeople, type Db } from '../src/lib/store';
 import { mailboxStates } from '../src/lib/deliverability';
+import { saveSettings } from '../src/lib/settings';
 import { importSuppression } from '../src/lib/suppression';
 import { TEST_ID, unsubscribeUrl } from '../src/lib/unsubscribe';
 
@@ -314,8 +315,19 @@ describe('pushToApollo', () => {
     expect(await outreachStatus(db)).toMatchObject({ sent: 1, waiting: 0 });
   });
 
-  it('pauses an inbox whose emails bounce, before giving it anyone new', async () => {
+  it('with auto-pause off (the default), keeps sending from an inbox whose emails bounce', async () => {
     await seed({ a: {}, b: {} });
+    const messages = Array.from({ length: 30 }, (_, i) => ({ id: `m${i}`, email_account_id: 'a1', from_email: 'ava@humansofglobe.com', completed_at: new Date().toISOString(), bounce: i < 3 }));
+    await db.query("UPDATE people SET apollo_sequence_id = 'seq-1' WHERE linkedin_url LIKE '%/b'");
+    const { svc, adds } = fakeApollo({ messages, accounts: ACCOUNTS.slice(0, 2) });
+    const summary = await push(svc);
+    expect(summary.paused).toEqual([]);
+    expect(adds.map((a) => a.get('send_email_from_email_account_id')).sort()).toEqual(['a1', 'a2']);
+  });
+
+  it('with auto-pause on, pauses an inbox whose emails bounce, before giving it anyone new', async () => {
+    await seed({ a: {}, b: {} });
+    await saveSettings(db, { autoPause: true });
     // ava@hog-one.com: 30 emails sent, 3 bounced (10%).
     const messages = Array.from({ length: 30 }, (_, i) => ({ id: `m${i}`, email_account_id: 'a1', from_email: 'ava@humansofglobe.com', completed_at: new Date().toISOString(), bounce: i < 3 }));
     await db.query("UPDATE people SET apollo_sequence_id = 'seq-1' WHERE linkedin_url LIKE '%/b'");
