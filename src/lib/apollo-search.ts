@@ -23,6 +23,8 @@ export const COMPANY_MAX_PAGE = 500;
 export const COMPANIES_PER_PEOPLE_SEARCH = 50;
 export const PEOPLE_PAGES_PER_COMPANIES = 3;
 export const PEOPLE_PER_PAGE_AT_COMPANIES = 100;
+/** Each Apollo search call gives up after this long, so a slow answer never runs a scheduler call past its limit. */
+export const SEARCH_TIMEOUT_MS = 15_000;
 
 /** Results per search page. 50 keeps each step (one search plus the lookups it leads to) well under a minute. */
 export const PER_PAGE = 50;
@@ -101,16 +103,26 @@ export function companySearchUrl(spec: SearchSpec, page: number): string {
 
 const headers = (key: string) => ({ 'x-api-key': key, 'content-type': 'application/json', accept: 'application/json', 'cache-control': 'no-cache' });
 
-/** One page of Apollo's company search (1 credit): the companies' Apollo ids. */
-export async function searchCompanies(svc: Services, spec: SearchSpec, page: number): Promise<{ total: number; ids: string[] }> {
+/**
+ * One page of Apollo's company search (1 credit): the Apollo ids of the companies on it, and whether it is the last page.
+ * Apollo lists companies already saved in the team's Apollo (as accounts, for example from contacts added earlier)
+ * apart from the rest; those are left out, since someone there has been contacted already. They still fill the page, so
+ * the last page is told from Apollo's page count, never from how many companies came back.
+ */
+export async function searchCompanies(svc: Services, spec: SearchSpec, page: number): Promise<{ ids: string[]; lastPage: boolean }> {
   const key = svc.keys.apollo;
   if (!key) throw new Error('APOLLO_API_KEY is not set');
-  const res = await getJson<{ organizations?: { id?: string | null }[]; pagination?: { total_entries?: number } }>(svc, companySearchUrl(spec, page), {
-    method: 'POST',
-    headers: headers(key),
-  });
+  const res = await getJson<{ organizations?: { id?: string | null }[]; accounts?: unknown[]; pagination?: { total_pages?: number; total_entries?: number } }>(
+    svc,
+    companySearchUrl(spec, page),
+    { method: 'POST', headers: headers(key) },
+    SEARCH_TIMEOUT_MS,
+  );
   const ids = [...new Set((res.organizations ?? []).map((o) => String(o.id ?? '')).filter(Boolean))];
-  return { total: Number(res.pagination?.total_entries) || 0, ids };
+  const returned = (res.organizations?.length ?? 0) + (res.accounts?.length ?? 0);
+  const totalPages = Number(res.pagination?.total_pages);
+  const lastPage = page >= COMPANY_MAX_PAGE || (totalPages > 0 ? page >= totalPages : returned < COMPANY_PER_PAGE);
+  return { ids, lastPage };
 }
 
 type SearchResponse = {
@@ -126,7 +138,7 @@ export async function searchPeople(
 ): Promise<{ total: number; people: FoundPerson[] }> {
   const key = svc.keys.apollo;
   if (!key) throw new Error('APOLLO_API_KEY is not set');
-  const res = await getJson<SearchResponse>(svc, searchUrl(spec, page, opts), { method: 'POST', headers: headers(key) });
+  const res = await getJson<SearchResponse>(svc, searchUrl(spec, page, opts), { method: 'POST', headers: headers(key) }, SEARCH_TIMEOUT_MS);
   return {
     total: Number(res.total_entries) || 0,
     people: (res.people ?? [])
@@ -168,8 +180,10 @@ export function searchesFor(market: Market, rules: TitleRules): SearchSpec[] {
 }
 
 /**
- * An ICP's searches: one per region its countries fall in (the US; the UK and Germany; the UAE and Saudi Arabia…), so a
- * run can skip a region whose brands already have all the leads they need.
+ * An ICP's searches: one per company keyword and region its countries fall in (the US; the UK and Germany; the UAE and
+ * Saudi Arabia…), keyword by keyword so the regions take turns. One keyword per company search, because Apollo does not
+ * say whether several keywords mean any or all of them; and per region, so a run can skip a region whose brands already
+ * have all the leads they need.
  */
 export function icpSearches(icp: Icp): SearchSpec[] {
   const byMarket = new Map<Market, string[]>();
@@ -178,16 +192,18 @@ export function icpSearches(icp: Icp): SearchSpec[] {
     if (m) byMarket.set(m, [...(byMarket.get(m) ?? []), c]);
   }
   const range = `${icp.employees[0]},${icp.employees[1]}`;
-  return [...byMarket].map(([market, locations]) => ({
-    key: `icp|${icp.id}|${range}|${icp.titles.map(short).join(',')}|${icp.seniorities.join(',')}|${icp.keywords.map(short).join(',')}|${locations.length}`,
-    market,
-    label: `${icp.label}: ${MARKETS[market].short}`,
-    sector: 'general' as const,
-    titles: icp.titles,
-    ranges: [range],
-    lane: icp.id,
-    locations,
-    companyKeywords: icp.keywords,
-    seniorities: icp.seniorities,
-  }));
+  return icp.keywords.flatMap((keyword) =>
+    [...byMarket].map(([market, locations]) => ({
+      key: `icp|${icp.id}|${short(keyword)}|${range}|${icp.titles.map(short).join(',')}|${icp.seniorities.join(',')}|${locations.length}`,
+      market,
+      label: `${icp.label}: ${MARKETS[market].short} (${keyword})`,
+      sector: 'general' as const,
+      titles: icp.titles,
+      ranges: [range],
+      lane: icp.id,
+      locations,
+      companyKeywords: [keyword],
+      seniorities: icp.seniorities,
+    })),
+  );
 }

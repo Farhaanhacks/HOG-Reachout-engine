@@ -19,7 +19,7 @@ function allowed(req: Request): boolean {
 
 /**
  * Called by the outside scheduler every couple of minutes. It answers at once (so the scheduler never times out) and
- * then, in the background, moves the autopilot's hourly run on (find, write, send) for up to ~45 seconds. Does nothing
+ * then, in the background, moves the autopilot's hourly run on (find, write, send) for up to ~30 seconds (well inside Vercel's 60). Does nothing
  * while the autopilot is switched off on the Run workflow page. What each call did shows in the Autopilot box there.
  */
 async function handle(req: Request) {
@@ -27,7 +27,7 @@ async function handle(req: Request) {
   if (!allowed(req)) return NextResponse.json({ error: 'Wrong or missing key.' }, { status: 401 });
   after(async () => {
     try {
-      await tick({ fetch, keys: keysFromEnv() }, getDb(), { budgetMs: 45_000 });
+      await tick({ fetch, keys: keysFromEnv() }, getDb(), { budgetMs: 30_000 });
     } catch (e) {
       console.error('autopilot tick failed', e);
     }

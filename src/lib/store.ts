@@ -57,6 +57,8 @@ export async function ensureSchema(db: Db): Promise<void> {
     ADD COLUMN IF NOT EXISTS apollo_sequence_id TEXT NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS sequence_note TEXT NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS sequenced_at TIMESTAMPTZ`);
+  // When the contact's HOG Brand and HOG Website fields were filled in Apollo.
+  await db.query('ALTER TABLE people ADD COLUMN IF NOT EXISTS brand_fields_at TIMESTAMPTZ');
   // (The instantly_* columns above are from the earlier Instantly setup and are no longer used.)
   // Leads from Apollo People Search: the full record the brief asks for, the title rule that picked them, and which inbox
   // sent to them. Leads from Apollo may have no LinkedIn profile, so the column allows blanks.

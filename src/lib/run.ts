@@ -2,7 +2,6 @@ import { bulkMatch, type ApolloMatch } from './apollo';
 import {
   COMPANIES_PER_PEOPLE_SEARCH,
   COMPANY_MAX_PAGE,
-  COMPANY_PER_PAGE,
   MAX_PAGE,
   PEOPLE_PAGES_PER_COMPANIES,
   PEOPLE_PER_PAGE_AT_COMPANIES,
@@ -199,7 +198,10 @@ export async function createRun(db: Db, brief: { markets?: string[]; target?: nu
     );
   }
   const turns = lanes.map(([lane]) => lane);
-  const pointer = new Map<string, number>();
+  // Each run starts every lane at a different search, so an ICP's keywords and regions all take turns over the hours.
+  const [count] = await db.query<{ n: number }>('SELECT count(*)::int AS n FROM runs');
+  const runNumber = Number(count?.n) || 0;
+  const pointer = new Map<string, number>(lanes.map(([lane]) => [lane, runNumber]));
   // Searches are free, and those whose brands or lane are already full are skipped for free, so plenty are planned;
   // what a run pays for is capped by the target (see runStep).
   const maxSteps = clamp(opts.maxSteps ?? Math.max(40, target), 1, MAX_STEPS);
@@ -219,12 +221,10 @@ export async function createRun(db: Db, brief: { markets?: string[]; target?: nu
   }
   if (!queries.length) throw new Error('Every search has been read to the end. Add titles on the Targeting page to find new people.');
   const quotas = quotasFor(target);
-  // Rotates which regions get a brand's odd extra lead from run to run.
-  const [count] = await db.query<{ n: number }>('SELECT count(*)::int AS n FROM runs');
 
   const [row] = await db.query<RunRow>('INSERT INTO runs (geo, brief, queries, pages, auto, phase) VALUES ($1, $2, $3, 1, $4, $5) RETURNING *', [
     markets.join(','),
-    JSON.stringify({ markets, target, quotas, lanes: laneCaps(target), regions: regionQuotas(quotas, markets, Number(count?.n) || 0) } satisfies RunBrief),
+    JSON.stringify({ markets, target, quotas, lanes: laneCaps(target), regions: regionQuotas(quotas, markets, runNumber) } satisfies RunBrief),
     JSON.stringify(queries),
     !!opts.auto,
     opts.auto ? 'finding' : '',
@@ -267,14 +267,20 @@ async function icpPeople(
   let ids: string[];
   const [kept] = await db.query<{ company_ids: string }>('SELECT company_ids FROM company_pages WHERE geo = $1 AND query = $2 AND page = $3', [q.market, q.key, page]);
   if (kept) ids = JSON.parse(kept.company_ids) as string[];
-  else {
-    ids = (await searchCompanies(svc, q, page)).ids;
+  let lastPage: boolean;
+  if (kept) {
+    const saved = JSON.parse(kept.company_ids) as string[] | { ids: string[]; lastPage: boolean };
+    // (Pages kept by the first version of this were a plain list, with no last-page flag.)
+    ids = Array.isArray(saved) ? saved : saved.ids;
+    lastPage = Array.isArray(saved) ? ids.length === 0 : saved.lastPage;
+  } else {
+    ({ ids, lastPage } = await searchCompanies(svc, q, page));
     credits = 1;
     await db.query('INSERT INTO company_pages (geo, query, page, company_ids) VALUES ($1, $2, $3, $4) ON CONFLICT (geo, query, page) DO NOTHING', [
       q.market,
       q.key,
       page,
-      JSON.stringify(ids),
+      JSON.stringify({ ids, lastPage }),
     ]);
   }
   const people = new Map<string, FoundPerson>();
@@ -291,7 +297,7 @@ async function icpPeople(
       }
     }
   }
-  return { page, people: [...people.values()], credits, lastPage: ids.length < COMPANY_PER_PAGE || page >= COMPANY_MAX_PAGE, allRead };
+  return { page, people: [...people.values()], credits, lastPage, allRead };
 }
 
 /** Saves one looked-up person with everything the brief asks for. Returns whether they are new and ready to email. */

@@ -66,9 +66,18 @@ export async function findCustomFields(svc: Services): Promise<FieldIds> {
   return ids;
 }
 
-/** The custom fields still to be created in Apollo, by name. */
-export function missingFields(ids: FieldIds): string[] {
-  return (Object.keys(CUSTOM_FIELDS) as (keyof typeof CUSTOM_FIELDS)[]).filter((k) => !ids[k]).map((k) => CUSTOM_FIELDS[k]);
+/** The custom fields still to be created in Apollo, by name (of all of them, or of `keys`). */
+export function missingFields(ids: FieldIds, keys: (keyof typeof CUSTOM_FIELDS)[] = Object.keys(CUSTOM_FIELDS) as (keyof typeof CUSTOM_FIELDS)[]): string[] {
+  return keys.filter((k) => !ids[k]).map((k) => CUSTOM_FIELDS[k]);
+}
+
+/** Sets custom fields on an existing Apollo contact (no credits). */
+export async function updateContactFields(svc: Services, contactId: string, fields: Record<string, string>): Promise<void> {
+  await getJson(svc, `${BASE}/contacts/${encodeURIComponent(contactId)}`, {
+    method: 'PATCH',
+    headers: headers(svc),
+    body: JSON.stringify({ typed_custom_fields: fields }),
+  });
 }
 
 export type ApolloContactInput = {

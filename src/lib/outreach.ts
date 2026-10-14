@@ -1,8 +1,8 @@
-import { addToSequence, createContact, findCustomFields, missingFields, skipReason, type ApolloContactInput, type FieldIds } from './apollo-sequences';
+import { addToSequence, createContact, findCustomFields, missingFields, skipReason, updateContactFields, type ApolloContactInput, type FieldIds } from './apollo-sequences';
 import { BRANDS, brandOfEmail, isBrand, type Brand } from './brands';
 import { allocate, autoPause, mailboxStates, senderNameOf, syncMailboxes, type MailboxState } from './deliverability';
 import { personalizeNext } from './personalize';
-import { draftEmail, fallbackOpenerFor, firstNameOf, roleFor, subjectFor, unsubscribeLine, type UnsubscribeStyle, type Variant } from './pitch';
+import { REQUIRED_FIELDS, draftEmail, fallbackOpenerFor, firstNameOf, roleFor, subjectFor, unsubscribeLine, type UnsubscribeStyle, type Variant } from './pitch';
 import { mapLimit, type Services } from './services';
 import { getSettings } from './settings';
 import { PERSON_COLUMNS, READY_SQL, ensureSchema, type Db, type SavedPerson } from './store';
@@ -33,7 +33,7 @@ type ContactSource = Pick<SavedPerson, 'id' | 'name' | 'title' | 'company' | 'em
 /**
  * The personal parts of a person's email, as they go into Apollo's custom fields: the subject, the congratulations
  * line, their role, the edition they are shortlisted for (from the news research, else their ICP's edition, else the
- * edition table for their industry), the industry line and their unsubscribe link.
+ * edition table for their industry), the industry line, their unsubscribe link, and their brand's name and website.
  */
 export function emailParts(p: ContactSource, opts: { unsubscribeId?: number | string; editions?: Edition[]; senderName?: string } = {}) {
   const icp = icpByLabel(p.segment);
@@ -46,6 +46,8 @@ export function emailParts(p: ContactSource, opts: { unsubscribeId?: number | st
     industry: e.industryLine,
     sender: opts.senderName?.trim() || 'The editorial team',
     unsubscribe: unsubscribeUrl(opts.unsubscribeId ?? p.id),
+    brand: BRANDS[isBrand(p.brand) ? p.brand : 'hog'].label,
+    website: BRANDS[isBrand(p.brand) ? p.brand : 'hog'].domain,
   };
 }
 
@@ -85,10 +87,10 @@ export function toApolloContact(
   return contact;
 }
 
-/** The custom fields must exist in Apollo, or the sequence would send emails with empty gaps. */
+/** The custom fields sending needs must exist in Apollo, or the sequence would send emails with empty gaps. */
 async function requireFields(svc: Services): Promise<FieldIds> {
   const fields = await findCustomFields(svc);
-  const missing = missingFields(fields);
+  const missing = missingFields(fields, REQUIRED_FIELDS);
   if (missing.length) throw new Error(`Create these custom contact fields in Apollo first: ${missing.join(', ')}.`);
   return fields;
 }
@@ -223,7 +225,12 @@ export async function pushToApollo(
     const inbox = inboxFor[i];
     try {
       const contactId = await createContact(svc, toApolloContact(p, fields, { editions: settings.editions, senderName: senderNameOf(byId.get(inbox) ?? { email: '' }) }));
-      await db.query('UPDATE people SET apollo_contact_id = $2 WHERE id = $1', [p.id, contactId]);
+      // With HOG Brand and HOG Website in Apollo, the contact has them now and needs no filling in later.
+      await db.query('UPDATE people SET apollo_contact_id = $2, brand_fields_at = CASE WHEN $3 THEN now() ELSE brand_fields_at END WHERE id = $1', [
+        p.id,
+        contactId,
+        !!(fields.brand && fields.website),
+      ]);
       return { p, contactId, inbox };
     } catch (e) {
       summary.failed++;
@@ -338,4 +345,39 @@ export async function sendTest(
   const res = await addToSequence(svc, opts.sequenceId, [contactId], inbox.id, { allowUnverified: true });
   const reason = res.skipped[contactId];
   return { added: !reason && res.added.includes(contactId), reason: reason ? skipReason(reason) : undefined, from: inbox.email, to };
+}
+
+/** How long after being added someone can still be due an email from the sequence (the follow-up, on alternate days). */
+const FOLLOW_UP_WINDOW_DAYS = 4;
+
+/**
+ * Fills HOG Brand and HOG Website on the Apollo contacts of people added before those fields existed, while an email of
+ * theirs may still be due, so a sequence that uses the fields never sends them a gap. Does nothing until both fields
+ * exist in Apollo. Free (no credits). Returns how many were filled.
+ */
+export async function backfillBrandFields(svc: Services, db: Db, limit = 40): Promise<number> {
+  if (!svc.keys.apollo) return 0;
+  await ensureSchema(db);
+  const rows = await db.query<{ id: number | string; apollo_contact_id: string; brand: string }>(
+    `SELECT id, apollo_contact_id, brand FROM people
+     WHERE sequence_status = 'added' AND apollo_contact_id <> '' AND brand_fields_at IS NULL
+       AND sequenced_at >= now() - ($2::int * interval '1 day')
+     ORDER BY sequenced_at DESC LIMIT $1`,
+    [Math.max(1, Math.min(limit, 200)), FOLLOW_UP_WINDOW_DAYS],
+  );
+  if (!rows.length) return 0;
+  const fields = await findCustomFields(svc);
+  if (!fields.brand || !fields.website) return 0;
+  let filled = 0;
+  await mapLimit(rows, 4, async (r) => {
+    const b = BRANDS[isBrand(r.brand) ? r.brand : 'hog'];
+    try {
+      await updateContactFields(svc, r.apollo_contact_id, { [fields.brand as string]: b.label, [fields.website as string]: b.domain });
+      await db.query('UPDATE people SET brand_fields_at = now() WHERE id = $1', [r.id]);
+      filled++;
+    } catch {
+      // Left for the next scheduler call.
+    }
+  });
+  return filled;
 }

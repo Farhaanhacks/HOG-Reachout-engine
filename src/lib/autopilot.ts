@@ -1,6 +1,6 @@
 import { BRAND_LIST, BRANDS } from './brands';
 import { dailyLimitFromEnv } from './enrich';
-import { outreachDailyLimitFromEnv, pushToApollo } from './outreach';
+import { backfillBrandFields, outreachDailyLimitFromEnv, pushToApollo } from './outreach';
 import { personalizeNext } from './personalize';
 import { createRun, finishRun, getRun, quotasMet, runStep, type Run } from './run';
 import type { Services } from './services';
@@ -10,7 +10,7 @@ import { ensureSchema, type Db } from './store';
 /**
  * Autopilot: one run every hour, around the clock, with nobody at the keyboard. An outside scheduler (cron-job.org)
  * calls the tick endpoint every couple of minutes; it answers at once and each call then moves the hour's run on in the
- * background for up to ~45 seconds:
+ * background for up to ~30 seconds:
  *   finding (Apollo search and lookups, split 35/30/35 between the brands and equally between the ICPs) → writing (the personal emails) →
  *   sending (each brand's waiting leads into its own sequence, from its own inboxes) → done.
  * Leads an inbox has no room for today stay waiting and go out on a later tick. A run that is still unfinished three
@@ -87,6 +87,9 @@ export type TickResult = { ran: boolean; reason?: string; runId?: number | strin
 /** One scheduler call: moves the current autopilot run on until the time budget is used. */
 export async function tick(svc: Services, db: Db, opts: { budgetMs?: number; now?: Date } = {}): Promise<TickResult> {
   await ensureSchema(db);
+  // Before anything else, and even while the autopilot is off or on a follow-up day: contacts already in a sequence get
+  // their brand's name and website, so their next email never has a gap.
+  await backfillBrandFields(svc, db).catch(() => 0);
   const ap = await getAutopilot(db);
   if (!ap.enabled) return { ran: false, reason: 'Autopilot is off', log: [] };
   const now = opts.now ?? new Date();

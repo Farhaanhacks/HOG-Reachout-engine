@@ -44,7 +44,15 @@ export const CUSTOM_FIELDS = {
   industry: 'HOG Industry',
   sender: 'HOG Sender',
   unsubscribe: 'HOG Unsubscribe link',
+  brand: 'HOG Brand',
+  website: 'HOG Website',
 } as const;
+
+/**
+ * The fields sending cannot do without. HOG Brand and HOG Website (the brand's name and website, so one sequence serves
+ * all three brands) are filled whenever they exist, and the site warns until they do, but sending never stops for them.
+ */
+export const REQUIRED_FIELDS = (Object.keys(CUSTOM_FIELDS) as (keyof typeof CUSTOM_FIELDS)[]).filter((k) => k !== 'brand' && k !== 'website');
 
 /** How a custom field is written in an Apollo template: {{contact.HOG Opener}} (the form Apollo's variable picker inserts). */
 export function fieldVariable(key: keyof typeof CUSTOM_FIELDS): string {
@@ -77,6 +85,9 @@ export function roleFor(title: string, company: string): string {
 
 /** The parts that change per person, as they go into the custom fields (or into a preview). */
 export type EmailParts = { firstName: string; opener: string; role: string; edition: string };
+/** The brand an email is signed for: its name, and its website as a link. */
+type Signed = { name: string; site: Link };
+const signedFor = (brand: Brand): Signed => ({ name: BRANDS[brand].label, site: { href: `https://${BRANDS[brand].domain}`, text: BRANDS[brand].domain } });
 type Bold = { bold: true; text: string };
 /** A link: in HTML a clickable link, in plain text its text (mail apps turn a bare domain into a link). */
 type Link = { href: string; text: string };
@@ -92,8 +103,8 @@ const INCLUDES = [
 ];
 
 /** The email as blocks, so the plain-text and HTML versions always say exactly the same thing. */
-function blocks(brand: Brand, variant: Variant, p: EmailParts, senderName: string, greetingName: string): Block[] {
-  const name = BRANDS[brand].label;
+function blocks(signed: Signed, variant: Variant, p: EmailParts, senderName: string, greetingName: string): Block[] {
+  const { name } = signed;
   return [
     `Dear ${greetingName},`,
     { bold: true, text: p.opener },
@@ -102,7 +113,7 @@ function blocks(brand: Brand, variant: Variant, p: EmailParts, senderName: strin
     { list: INCLUDES },
     ...(variant === 'A' ? [{ bold: true, text: FEE_LINE } as Bold] : []),
     'We believe your story would be a great fit for this edition. Would you like to explore it? Simply reply to this email and I will share the full proposal.',
-    { lines: ['Warm regards,', senderName, SENDER.designation, name, `Office: ${SENDER.office}`, `WhatsApp: ${SENDER.whatsapp}`, { href: `https://${BRANDS[brand].domain}`, text: BRANDS[brand].domain }] },
+    { lines: ['Warm regards,', senderName, SENDER.designation, name, `Office: ${SENDER.office}`, `WhatsApp: ${SENDER.whatsapp}`, signed.site] },
   ];
 }
 
@@ -160,7 +171,7 @@ export function draftEmail(p: DraftInput): Draft {
     role: roleFor(p.title, p.company),
     edition: p.edition?.trim() || 'Top Business Leaders to Watch',
   };
-  const body = toText(blocks(p.brand ?? 'hog', p.variant ?? 'A', parts, p.senderName || '[Sender name]', firstName || 'Sir or Madam'));
+  const body = toText(blocks(signedFor(p.brand ?? 'hog'), p.variant ?? 'A', parts, p.senderName || '[Sender name]', firstName || 'Sir or Madam'));
   return { firstName, subject: subjectFor(p.company), body };
 }
 
@@ -174,16 +185,22 @@ const TEMPLATE_PARTS: EmailParts = { firstName: '', opener: fieldVariable('opene
 // {{sender_first_name}} would give the Apollo user who owns the inboxes instead.
 const TEMPLATE_SENDER = fieldVariable('sender');
 const TEMPLATE_GREETING = '{{#if first_name}}{{first_name}}{{#else}}Sir or Madam{{#endif}}';
+// The brand's name and website come from each contact (HOG Brand, HOG Website), so the same sequence signs a Gulf Icons
+// lead's email as Gulf Icons with gulficons.com, and a CIO Minds lead's as CIO Minds with ciominds.com.
+const TEMPLATE_SIGNED: Signed = { name: fieldVariable('brand'), site: { href: `https://${fieldVariable('website')}`, text: fieldVariable('website') } };
 
-/** The plain-text email to paste into the brand's Apollo sequence step: version A or B, ending in the chosen opt-out. */
-export function sequenceTemplate(brand: Brand = 'hog', variant: Variant = 'A', style: UnsubscribeStyle = 'button'): { subject: string; body: string } {
-  const body = toText(blocks(brand, variant, TEMPLATE_PARTS, TEMPLATE_SENDER, TEMPLATE_GREETING));
+/**
+ * The plain-text email to paste into an Apollo sequence step: version A or B, ending in the chosen opt-out. The same for
+ * every brand (the brand's name and website are fields), so one sequence can serve all three; `brand` is kept for callers.
+ */
+export function sequenceTemplate(_brand: Brand = 'hog', variant: Variant = 'A', style: UnsubscribeStyle = 'button'): { subject: string; body: string } {
+  const body = toText(blocks(TEMPLATE_SIGNED, variant, TEMPLATE_PARTS, TEMPLATE_SENDER, TEMPLATE_GREETING));
   return { subject: fieldVariable('subject'), body: style === 'apollo' ? body : `${body}\n\n${unsubscribeLine(style, fieldVariable('unsubscribe'))}` };
 }
 
 /** The same email as HTML for Apollo's raw HTML editor, ending in the Unsubscribe button. */
-export function sequenceTemplateHtml(brand: Brand = 'hog', variant: Variant = 'A'): string {
-  return `${toHtml(blocks(brand, variant, TEMPLATE_PARTS, TEMPLATE_SENDER, TEMPLATE_GREETING))}\n${unsubscribeButtonHtml(fieldVariable('unsubscribe'))}`;
+export function sequenceTemplateHtml(_brand: Brand = 'hog', variant: Variant = 'A'): string {
+  return `${toHtml(blocks(TEMPLATE_SIGNED, variant, TEMPLATE_PARTS, TEMPLATE_SENDER, TEMPLATE_GREETING))}\n${unsubscribeButtonHtml(fieldVariable('unsubscribe'))}`;
 }
 
 /**
@@ -191,8 +208,8 @@ export function sequenceTemplateHtml(brand: Brand = 'hog', variant: Variant = 'A
  * who has not replied or unsubscribed; Apollo stops the sequence for those who have. It is the same for versions A and B
  * and does not mention the fee, so the A/B test stays about the first email.
  */
-function followUpBlocks(brand: Brand, p: Pick<EmailParts, 'role' | 'edition'>, senderName: string, greetingName: string): Block[] {
-  const name = BRANDS[brand].label;
+function followUpBlocks(signed: Signed, p: Pick<EmailParts, 'role' | 'edition'>, senderName: string, greetingName: string): Block[] {
+  const { name } = signed;
   return [
     `Dear ${greetingName},`,
     `I wanted to follow up on my note yesterday about featuring you on the cover of our upcoming special edition, "${p.edition}".`,
@@ -203,12 +220,12 @@ function followUpBlocks(brand: Brand, p: Pick<EmailParts, 'role' | 'edition'>, s
 }
 
 /** The follow-up for the brand's sequence step 2: plain text, ending in the chosen opt-out. Sent as a reply, so no subject. */
-export function followUpTemplate(brand: Brand = 'hog', style: UnsubscribeStyle = 'button'): { body: string } {
-  const body = toText(followUpBlocks(brand, TEMPLATE_PARTS, TEMPLATE_SENDER, TEMPLATE_GREETING));
+export function followUpTemplate(_brand: Brand = 'hog', style: UnsubscribeStyle = 'button'): { body: string } {
+  const body = toText(followUpBlocks(TEMPLATE_SIGNED, TEMPLATE_PARTS, TEMPLATE_SENDER, TEMPLATE_GREETING));
   return { body: style === 'apollo' ? body : `${body}\n\n${unsubscribeLine(style, fieldVariable('unsubscribe'))}` };
 }
 
 /** The follow-up as HTML for Apollo's raw HTML editor, ending in the Unsubscribe button. */
-export function followUpTemplateHtml(brand: Brand = 'hog'): string {
-  return `${toHtml(followUpBlocks(brand, TEMPLATE_PARTS, TEMPLATE_SENDER, TEMPLATE_GREETING))}\n${unsubscribeButtonHtml(fieldVariable('unsubscribe'))}`;
+export function followUpTemplateHtml(_brand: Brand = 'hog'): string {
+  return `${toHtml(followUpBlocks(TEMPLATE_SIGNED, TEMPLATE_PARTS, TEMPLATE_SENDER, TEMPLATE_GREETING))}\n${unsubscribeButtonHtml(fieldVariable('unsubscribe'))}`;
 }
